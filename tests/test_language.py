@@ -1,6 +1,12 @@
+import sys
 import unittest
+from pathlib import Path
 
-from src.language import LanguageResult, detect_language
+SRC_DIR = Path(__file__).resolve().parents[1] / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from language import LanguageResult, detect_language
 
 
 class LanguageDetectionTests(unittest.TestCase):
