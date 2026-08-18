@@ -5,6 +5,33 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "nexa.db"
 
+MEMORY_STOPWORDS = {
+    "aanu",
+    "aano",
+    "ahno",
+    "alle",
+    "alla",
+    "entha",
+    "enthu",
+    "ente",
+    "njan",
+    "njn",
+    "nammal",
+    "namukku",
+    "ippo",
+    "ith",
+    "ithu",
+    "athu",
+    "oru",
+    "pinne",
+    "undo",
+    "ille",
+    "cheyyande",
+    "cheyyam",
+    "venam",
+    "venda",
+}
+
 
 def _utc_now():
     return datetime.now(timezone.utc).isoformat()
@@ -89,11 +116,13 @@ def search_memory(query, limit=5):
     words = [
         word.lower()
         for word in re.findall(r"[A-Za-z0-9]+", query)
-        if len(word) >= 3
+        if len(word) >= 3 and word.lower() not in MEMORY_STOPWORDS
     ]
 
     if not words:
         return []
+
+    normalized_query = query.strip().lower()
 
     with get_connection() as conn:
         rows = conn.execute(
@@ -106,12 +135,19 @@ def search_memory(query, limit=5):
         ).fetchall()
 
     scored = []
+    minimum_score = 2 if len(set(words)) >= 2 else 1
 
     for role, content in rows:
-        text = content.lower()
-        score = sum(1 for word in words if word in text)
+        text = content.strip().lower()
 
-        if score > 0:
+        # The current message is saved before retrieval; never retrieve that same
+        # message back as if it were older memory.
+        if text == normalized_query:
+            continue
+
+        score = sum(1 for word in set(words) if word in text)
+
+        if score >= minimum_score:
             scored.append((score, role, content))
 
     scored.sort(key=lambda item: item[0], reverse=True)
