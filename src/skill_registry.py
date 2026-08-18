@@ -32,7 +32,7 @@ INSTALLED_SKILLS = (
         key="git",
         name="Git Operator v1",
         status="active",
-        description="Deterministic allow-listed Git operations with safety checks; no arbitrary shell execution.",
+        description="Deterministic allow-listed Git operations with branch and conflict safety; no arbitrary shell execution.",
         commands=(
             "git status nokku",
             "git pull cheyyu",
@@ -42,6 +42,9 @@ INSTALLED_SKILLS = (
             "githubilek push cheyyu",
             "current branch",
             "recent commits",
+            "conflicts nokku",
+            "test-safe branch create cheyyu",
+            "main branchilek switch cheyyu",
         ),
     ),
 )
