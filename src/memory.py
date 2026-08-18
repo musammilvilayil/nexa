@@ -50,6 +50,11 @@ def _utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def _language_key(text):
+    tokens = re.findall(r"[A-Za-z0-9\u0D00-\u0D7F']+", text.lower())
+    return " ".join(tokens)
+
+
 def get_connection():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     return sqlite3.connect(DB_PATH)
@@ -88,6 +93,27 @@ def init_db():
                 meaning_english TEXT,
                 confidence REAL NOT NULL DEFAULT 0.0,
                 provider TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS teacher_examples (
+                source_key TEXT PRIMARY KEY,
+                source_text TEXT NOT NULL,
+                detected_language TEXT NOT NULL,
+                student_normalized_malayalam TEXT,
+                student_meaning_english TEXT,
+                student_confidence REAL NOT NULL DEFAULT 0.0,
+                teacher_normalized_malayalam TEXT,
+                teacher_meaning_english TEXT,
+                teacher_confidence REAL NOT NULL DEFAULT 0.0,
+                teacher_provider TEXT NOT NULL,
+                lesson TEXT,
+                use_count INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
             """
@@ -153,8 +179,6 @@ def search_memory(query, limit=5):
     for role, content in rows:
         text = content.strip().lower()
 
-        # The current message is saved before retrieval; never retrieve that same
-        # message back as if it were older memory.
         if text == normalized_query:
             continue
 
@@ -217,8 +241,6 @@ def identify_fact_query(query):
 
 
 def resolve_fact_query(query):
-    # Explicit intent aliases are safer than word overlap. For example, the
-    # Manglish word "peru" should resolve the stored "name" fact.
     explicit_key = identify_fact_query(query)
 
     if explicit_key:
@@ -243,8 +265,6 @@ def resolve_fact_query(query):
             best_score = score
             best_match = (key, value)
 
-    # Keep fuzzy fallback conservative; explicit aliases above handle one-word
-    # concepts such as name/peru without accidentally matching unrelated text.
     if best_score >= 2:
         return best_match
 
@@ -355,6 +375,137 @@ def get_language_cache(source_text):
         "meaning_english": row[2],
         "confidence": float(row[3]),
         "provider": row[4],
+    }
+
+
+def save_teacher_example(
+    source_text,
+    detected_language,
+    student_normalized_malayalam=None,
+    student_meaning_english=None,
+    student_confidence=0.0,
+    teacher_normalized_malayalam=None,
+    teacher_meaning_english=None,
+    teacher_confidence=0.0,
+    teacher_provider="gemini",
+    lesson=None,
+):
+    now = _utc_now()
+    source_key = _language_key(source_text)
+
+    with get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO teacher_examples (
+                source_key,
+                source_text,
+                detected_language,
+                student_normalized_malayalam,
+                student_meaning_english,
+                student_confidence,
+                teacher_normalized_malayalam,
+                teacher_meaning_english,
+                teacher_confidence,
+                teacher_provider,
+                lesson,
+                use_count,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+            ON CONFLICT(source_key)
+            DO UPDATE SET
+                source_text = excluded.source_text,
+                detected_language = excluded.detected_language,
+                student_normalized_malayalam = excluded.student_normalized_malayalam,
+                student_meaning_english = excluded.student_meaning_english,
+                student_confidence = excluded.student_confidence,
+                teacher_normalized_malayalam = excluded.teacher_normalized_malayalam,
+                teacher_meaning_english = excluded.teacher_meaning_english,
+                teacher_confidence = excluded.teacher_confidence,
+                teacher_provider = excluded.teacher_provider,
+                lesson = excluded.lesson,
+                updated_at = excluded.updated_at
+            """,
+            (
+                source_key,
+                source_text,
+                detected_language,
+                student_normalized_malayalam,
+                student_meaning_english,
+                float(student_confidence),
+                teacher_normalized_malayalam,
+                teacher_meaning_english,
+                float(teacher_confidence),
+                teacher_provider,
+                lesson,
+                now,
+                now,
+            ),
+        )
+        conn.commit()
+
+
+def get_teacher_example(source_text, minimum_confidence=0.70):
+    source_key = _language_key(source_text)
+
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                detected_language,
+                teacher_normalized_malayalam,
+                teacher_meaning_english,
+                teacher_confidence,
+                teacher_provider,
+                lesson,
+                use_count
+            FROM teacher_examples
+            WHERE source_key = ? AND teacher_confidence >= ?
+            """,
+            (source_key, float(minimum_confidence)),
+        ).fetchone()
+
+        if not row:
+            return None
+
+        conn.execute(
+            """
+            UPDATE teacher_examples
+            SET use_count = use_count + 1, updated_at = ?
+            WHERE source_key = ?
+            """,
+            (_utc_now(), source_key),
+        )
+        conn.commit()
+
+    return {
+        "detected_language": row[0],
+        "normalized_malayalam": row[1],
+        "meaning_english": row[2],
+        "confidence": float(row[3]),
+        "provider": row[4],
+        "lesson": row[5],
+        "use_count": int(row[6]) + 1,
+    }
+
+
+def get_teacher_stats():
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                COUNT(*),
+                COALESCE(SUM(use_count), 0),
+                COALESCE(AVG(teacher_confidence), 0.0)
+            FROM teacher_examples
+            """
+        ).fetchone()
+
+    return {
+        "lessons": int(row[0]),
+        "reuses": int(row[1]),
+        "average_confidence": float(row[2]),
     }
 
 
