@@ -23,6 +23,18 @@ class LanguageDetectionTests(unittest.TestCase):
             "manglish",
         )
 
+    def test_detects_next_step_manglish(self):
+        self.assertEqual(
+            detect_language("nammal ini enth cheyyum"),
+            "manglish",
+        )
+
+    def test_detects_mixed_build_suggestion_as_manglish(self):
+        self.assertEqual(
+            detect_language("oru platform build cheythalo"),
+            "manglish",
+        )
+
     def test_detects_english(self):
         self.assertEqual(detect_language("what should we build next"), "english")
 
