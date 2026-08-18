@@ -1,7 +1,10 @@
 import re
+from pathlib import Path
 
 import httpx
 
+from git_router import handle_git_command
+from git_skill import GitSkill
 from language import prepare_user_input
 from memory import (
     extract_fact,
@@ -19,6 +22,7 @@ from memory import (
 MODEL = "qwen3:1.7b"
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MALAYALAM_RE = re.compile(r"[\u0D00-\u0D7F]")
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 SYSTEM_PROMPT = """
 You are NEXA, a local personal AI assistant.
@@ -210,13 +214,14 @@ def _print_teacher_stats():
 
 def main():
     init_db()
+    git_skill = GitSkill(REPO_ROOT)
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages.extend(load_recent_messages(limit=12))
 
     print(
-        "NEXA ONLINE - Auto Memory + Teacher-Student Language Layer Enabled. "
-        "Type /teacher-stats or /exit.\n"
+        "NEXA ONLINE - Auto Memory + Teacher-Student + Git Operator Enabled. "
+        "Type /teacher-stats, /git status, /git pull, or /exit.\n"
     )
 
     while True:
@@ -231,6 +236,14 @@ def main():
             continue
 
         if not user:
+            continue
+
+        # Deterministic tool routing happens before the LLM. Only recognized
+        # repository intents can reach the allow-listed GitSkill API.
+        git_reply = handle_git_command(user, git_skill)
+        if git_reply is not None:
+            save_message("user", user)
+            _record_reply(messages, user, git_reply)
             continue
 
         save_message("user", user)
