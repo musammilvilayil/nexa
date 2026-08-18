@@ -1,17 +1,16 @@
 import json
-import os
 import re
 from dataclasses import dataclass
 
 import httpx
 
-from memory import get_language_cache, save_language_cache
-
-GEMINI_API_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    "{model}:generateContent"
+from memory import (
+    get_language_cache,
+    get_teacher_example,
+    save_language_cache,
+    save_teacher_example,
 )
-DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
+from teacher import normalize_manglish, teacher_available
 
 MALAYALAM_RE = re.compile(r"[\u0D00-\u0D7F]")
 WORD_RE = re.compile(r"[A-Za-z']+")
@@ -55,9 +54,8 @@ MANGGLISH_HINTS = {
     "ithu",
 }
 
-# High-confidence local phrases. This gives the small local model clean intent
-# even when Gemini is unavailable. We will later replace/expand this with a
-# proper transliteration model and learned correction dataset.
+# High-confidence local phrases are the first layer of the student. Teacher
+# lessons learned later are stored in SQLite and become another local layer.
 LOCAL_MANGGLISH_PHRASES = {
     "nammal ippo entha cheyyande": (
         "നമ്മൾ ഇപ്പോൾ എന്താ ചെയ്യേണ്ടത്?",
@@ -165,100 +163,116 @@ def _local_phrase_normalize(text):
         normalized_malayalam=normalized_malayalam,
         meaning_english=meaning_english,
         confidence=0.99,
-        provider="local-phrase",
+        provider="student:local-phrase",
     )
 
 
-def _parse_json_text(text):
-    clean = text.strip()
-
-    if clean.startswith("```"):
-        clean = re.sub(r"^```(?:json)?\s*", "", clean, flags=re.IGNORECASE)
-        clean = re.sub(r"\s*```$", "", clean)
-
-    start = clean.find("{")
-    end = clean.rfind("}")
-
-    if start == -1 or end == -1 or end <= start:
-        raise ValueError("Gemini did not return a JSON object")
-
-    return json.loads(clean[start : end + 1])
-
-
-def _gemini_normalize(text):
-    api_key = os.getenv("GEMINI_API_KEY", "").strip()
-
-    if not api_key:
-        return None
-
-    model = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()
-    url = GEMINI_API_URL.format(model=model)
-
-    prompt = f"""
-You are the language-normalization layer for NEXA.
-The user may write Malayalam using Latin letters (Manglish), with spelling variations, abbreviations, and English code-switching.
-
-Task:
-1. Decide whether the input is Manglish.
-2. Preserve the exact intended meaning; do not invent facts.
-3. If it is Manglish, write a natural Malayalam-script normalization.
-4. Give a concise English meaning for downstream reasoning.
-5. Return a confidence from 0.0 to 1.0.
-
-Return ONLY this JSON shape:
-{{
-  "is_manglish": true,
-  "normalized_malayalam": "...",
-  "meaning_english": "...",
-  "confidence": 0.0
-}}
-
-Input:
-{text}
-""".strip()
-
-    response = httpx.post(
-        url,
-        headers={
-            "x-goog-api-key": api_key,
-            "Content-Type": "application/json",
-        },
-        json={
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt},
-                    ]
-                }
-            ]
-        },
-        timeout=30,
+def _student_fallback(text):
+    return LanguageResult(
+        original=text,
+        detected_language="manglish",
+        confidence=0.45,
+        provider="student:local-fallback",
     )
-    response.raise_for_status()
 
-    payload = response.json()
-    output_text = payload["candidates"][0]["content"]["parts"][0]["text"]
-    parsed = _parse_json_text(output_text)
 
-    if not parsed.get("is_manglish", False):
+def _learned_teacher_result(text):
+    learned = get_teacher_example(text)
+
+    if not learned:
         return None
 
-    confidence = parsed.get("confidence", 0.0)
+    return LanguageResult(
+        original=text,
+        detected_language=learned["detected_language"],
+        normalized_malayalam=learned["normalized_malayalam"],
+        meaning_english=learned["meaning_english"],
+        confidence=learned["confidence"],
+        provider=f"student:learned:{learned['provider']}",
+    )
 
-    try:
-        confidence = float(confidence)
-    except (TypeError, ValueError):
-        confidence = 0.0
 
-    confidence = max(0.0, min(1.0, confidence))
+def _legacy_cached_result(text):
+    cached = get_language_cache(text)
+
+    if not cached or not cached["provider"].startswith("gemini:"):
+        return None
+
+    # Migrate an older Gemini cache entry into the explicit teacher dataset so
+    # future uses count as student-learned examples.
+    save_teacher_example(
+        source_text=text,
+        detected_language=cached["detected_language"],
+        student_confidence=0.45,
+        teacher_normalized_malayalam=cached["normalized_malayalam"],
+        teacher_meaning_english=cached["meaning_english"],
+        teacher_confidence=cached["confidence"],
+        teacher_provider=cached["provider"],
+        lesson="Migrated from legacy Gemini language cache.",
+    )
+
+    return LanguageResult(
+        original=text,
+        detected_language=cached["detected_language"],
+        normalized_malayalam=cached["normalized_malayalam"],
+        meaning_english=cached["meaning_english"],
+        confidence=cached["confidence"],
+        provider=f"student:learned:{cached['provider']}",
+    )
+
+
+def _ask_teacher(text, student_result):
+    if not teacher_available():
+        return None
+
+    student_guess = {
+        "normalized_malayalam": student_result.normalized_malayalam,
+        "meaning_english": student_result.meaning_english,
+        "confidence": student_result.confidence,
+        "provider": student_result.provider,
+    }
+
+    teacher = normalize_manglish(text, student_guess=student_guess)
+
+    if not teacher:
+        return None
+
+    # Low-confidence teacher output is not allowed to become persistent student
+    # knowledge. The raw student fallback remains available instead.
+    if teacher["confidence"] < 0.70:
+        return None
+
+    save_teacher_example(
+        source_text=text,
+        detected_language="manglish",
+        student_normalized_malayalam=student_result.normalized_malayalam,
+        student_meaning_english=student_result.meaning_english,
+        student_confidence=student_result.confidence,
+        teacher_normalized_malayalam=teacher["normalized_malayalam"],
+        teacher_meaning_english=teacher["meaning_english"],
+        teacher_confidence=teacher["confidence"],
+        teacher_provider=teacher["provider"],
+        lesson=teacher["lesson"],
+    )
+
+    # Keep the old cache populated for backwards compatibility with earlier
+    # NEXA builds while teacher_examples becomes the source of learned lessons.
+    save_language_cache(
+        source_text=text,
+        detected_language="manglish",
+        normalized_malayalam=teacher["normalized_malayalam"],
+        meaning_english=teacher["meaning_english"],
+        confidence=teacher["confidence"],
+        provider=teacher["provider"],
+    )
 
     return LanguageResult(
         original=text,
         detected_language="manglish",
-        normalized_malayalam=(parsed.get("normalized_malayalam") or "").strip() or None,
-        meaning_english=(parsed.get("meaning_english") or "").strip() or None,
-        confidence=confidence,
-        provider=f"gemini:{model}",
+        normalized_malayalam=teacher["normalized_malayalam"],
+        meaning_english=teacher["meaning_english"],
+        confidence=teacher["confidence"],
+        provider=f"teacher:{teacher['provider']}",
     )
 
 
@@ -270,47 +284,34 @@ def prepare_user_input(text):
             original=text,
             detected_language=detected,
             confidence=1.0,
-            provider="local-detector",
+            provider="student:local-detector",
         )
 
-    # Use deterministic local interpretations first when we know the phrase.
+    # STUDENT STEP 1: deterministic high-confidence local knowledge.
     local_result = _local_phrase_normalize(text)
     if local_result:
         return local_result
 
-    cached = get_language_cache(text)
+    # STUDENT STEP 2: lessons previously taught by Gemini. This is local SQLite
+    # retrieval, so repeated phrases no longer need a Gemini API call.
+    learned_result = _learned_teacher_result(text)
+    if learned_result:
+        return learned_result
 
-    if cached and cached["provider"].startswith("gemini:"):
-        return LanguageResult(
-            original=text,
-            detected_language=cached["detected_language"],
-            normalized_malayalam=cached["normalized_malayalam"],
-            meaning_english=cached["meaning_english"],
-            confidence=cached["confidence"],
-            provider=f"cache:{cached['provider']}",
-        )
+    # Backwards-compatible migration path for lessons from the old cache.
+    legacy_result = _legacy_cached_result(text)
+    if legacy_result:
+        return legacy_result
 
+    # STUDENT STEP 3: safe low-confidence fallback. We deliberately do not invent
+    # a transliteration when the local system does not know the phrase.
+    student_result = _student_fallback(text)
+
+    # TEACHER STEP: only unseen/unknown Manglish reaches Gemini. A trusted lesson
+    # is saved to SQLite and becomes local student knowledge on the next use.
     try:
-        result = _gemini_normalize(text)
+        teacher_result = _ask_teacher(text, student_result)
     except (httpx.HTTPError, KeyError, ValueError, json.JSONDecodeError):
-        result = None
+        teacher_result = None
 
-    if result:
-        save_language_cache(
-            source_text=text,
-            detected_language=result.detected_language,
-            normalized_malayalam=result.normalized_malayalam,
-            meaning_english=result.meaning_english,
-            confidence=result.confidence,
-            provider=result.provider,
-        )
-        return result
-
-    # Safe local fallback: preserve raw text and clearly tell the local model that
-    # this is Manglish instead of inventing a low-confidence transliteration.
-    return LanguageResult(
-        original=text,
-        detected_language="manglish",
-        confidence=0.45,
-        provider="local-fallback",
-    )
+    return teacher_result or student_result
