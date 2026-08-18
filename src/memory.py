@@ -32,6 +32,19 @@ MEMORY_STOPWORDS = {
     "venda",
 }
 
+FACT_QUERY_PATTERNS = {
+    "name": [
+        r"\bente\s+(?:peru|peeru|name)\s+(?:entha|enthanu|enthaan|enthaa)\b",
+        r"\bwhat\s+is\s+my\s+name\b",
+        r"\bwhat(?:'s| is)\s+my\s+name\b",
+    ],
+    "favourite_color": [
+        r"\bente\s+(?:favourite|favorite)\s+color\s+(?:entha|enthanu|enthaan|enthaa)\b",
+        r"\bwhat\s+is\s+my\s+(?:favourite|favorite)\s+colou?r\b",
+        r"\bwhat(?:'s| is)\s+my\s+(?:favourite|favorite)\s+colou?r\b",
+    ],
+}
+
 
 def _utc_now():
     return datetime.now(timezone.utc).isoformat()
@@ -193,7 +206,25 @@ def get_all_facts():
     return {key: value for key, value in rows}
 
 
+def identify_fact_query(query):
+    clean = " ".join(query.strip().lower().split())
+
+    for key, patterns in FACT_QUERY_PATTERNS.items():
+        if any(re.search(pattern, clean) for pattern in patterns):
+            return key
+
+    return None
+
+
 def resolve_fact_query(query):
+    # Explicit intent aliases are safer than word overlap. For example, the
+    # Manglish word "peru" should resolve the stored "name" fact.
+    explicit_key = identify_fact_query(query)
+
+    if explicit_key:
+        value = get_fact(explicit_key)
+        return (explicit_key, value) if value is not None else None
+
     query_words = {
         word.lower()
         for word in re.findall(r"[A-Za-z0-9]+", query)
@@ -212,6 +243,8 @@ def resolve_fact_query(query):
             best_score = score
             best_match = (key, value)
 
+    # Keep fuzzy fallback conservative; explicit aliases above handle one-word
+    # concepts such as name/peru without accidentally matching unrelated text.
     if best_score >= 2:
         return best_match
 
@@ -231,7 +264,7 @@ def extract_fact(text):
             "favourite_color",
         ),
         (
-            r"^ente\s+name\s+(.+?)\s+aanu(?:[,\s].*)?$",
+            r"^ente\s+(?:name|peru|peeru)\s+(.+?)\s+aanu(?:[,\s].*)?$",
             "name",
         ),
         (
