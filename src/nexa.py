@@ -26,6 +26,7 @@ You understand English, Malayalam, and Manglish.
 Language rules:
 - Manglish means Malayalam spoken language written using Latin letters.
 - When the user writes Manglish, understand the Malayalam meaning and answer in natural Latin-script Manglish.
+- Manglish output should use natural Malayalam conversational grammar written in Latin letters. English technical words are fine.
 - Do not output Malayalam Unicode/script for a Manglish user unless they explicitly ask for Malayalam script.
 - Normalized Malayalam and English meaning supplied by the language layer are interpretation metadata only.
 - Never answer by merely translating, echoing, or restating the current user message.
@@ -54,6 +55,28 @@ def ask_ollama(messages):
     return response.json()["message"]["content"]
 
 
+def _normalized_text(text):
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _is_translation_echo(reply, language_result):
+    reply_norm = _normalized_text(reply)
+
+    if not reply_norm:
+        return False
+
+    candidates = [
+        language_result.original,
+        language_result.meaning_english,
+    ]
+
+    for candidate in candidates:
+        if candidate and reply_norm == _normalized_text(candidate):
+            return True
+
+    return False
+
+
 def repair_manglish_reply(reply, language_result, messages):
     if language_result.detected_language != "manglish":
         return reply
@@ -65,16 +88,31 @@ def repair_manglish_reply(reply, language_result, messages):
     merely_repeated_normalization = bool(
         normalized and reply_clean.rstrip(".!?") == normalized.rstrip(".!?")
     )
+    translation_echo = _is_translation_echo(reply_clean, language_result)
 
-    if not used_malayalam_script and not merely_repeated_normalization:
+    if not used_malayalam_script and not merely_repeated_normalization and not translation_echo:
         return reply
 
-    correction = """
-Your previous draft did not follow the response-language rule.
-Answer the ORIGINAL user's request directly now.
-Do not translate or repeat the user's question.
-Use natural Manglish written only with Latin letters (English words are fine when natural).
-Do not use Malayalam script.
+    correction = f"""
+Your previous draft failed NEXA's Manglish response rule.
+
+ORIGINAL USER MESSAGE:
+{language_result.original}
+
+INTENDED MEANING (interpretation only):
+{language_result.meaning_english or 'Use the original Manglish message.'}
+
+Now answer the ORIGINAL user's request directly.
+Do NOT translate, paraphrase, or repeat the user's question.
+Write conversational Malayalam using LATIN letters only: natural Manglish.
+English technical words are allowed, but the sentence grammar should sound like spoken Malayalam.
+Do not use Malayalam Unicode/script.
+
+Good style examples:
+- "Athe, nammal ath cheyyam."
+- "Ippo next step testing aanu."
+- "Nammal adyam issue check cheythittu fix cheyyam."
+
 Return only the corrected answer.
 """.strip()
 
