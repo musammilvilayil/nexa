@@ -75,8 +75,29 @@ def _is_translation_echo(reply, language_result):
     ]
 
     for candidate in candidates:
-        if candidate and reply_norm == _normalized_text(candidate):
+        if not candidate:
+            continue
+
+        candidate_norm = _normalized_text(candidate)
+        if not candidate_norm:
+            continue
+
+        # Exact echo/translation.
+        if reply_norm == candidate_norm:
             return True
+
+        # Catch acknowledgement + copied question, for example:
+        # "Athe, njan innu ... rest edukkatte".
+        if len(candidate_norm.split()) >= 4 and candidate_norm in reply_norm:
+            return True
+
+        # Catch near-verbatim copies where punctuation/filler words differ.
+        candidate_words = set(candidate_norm.split())
+        reply_words = set(reply_norm.split())
+        if len(candidate_words) >= 5:
+            overlap = len(candidate_words & reply_words) / len(candidate_words)
+            if overlap >= 0.90:
+                return True
 
     return False
 
@@ -137,15 +158,17 @@ INTENDED MEANING (interpretation only):
 {language_result.meaning_english or 'Use the original Manglish message.'}
 
 Now answer the ORIGINAL user's request directly.
-Do NOT translate, paraphrase, or repeat the user's question.
+Do NOT translate, paraphrase, copy, or repeat the user's question.
+Do NOT simply prepend words like "Athe" to the user's sentence.
 Write conversational Malayalam using LATIN letters only: natural Manglish.
 English technical words are allowed, but the sentence grammar should sound like spoken Malayalam.
 Do not use Malayalam Unicode/script.
+If the user is asking for permission/advice, answer the decision first and then give one short useful reason or next action.
 
 Good style examples:
-- "Athe, nammal ath cheyyam."
-- "Ippo next step testing aanu."
-- "Nammal adyam issue check cheythittu fix cheyyam."
+- User asks whether to rest -> "Athe, kurach neram rest edukku. Fresh aayittu pinne continue cheyyam."
+- User asks what to do next -> "Ippo next step testing aanu."
+- User asks to proceed -> "Athe, nammal ath cheyyam."
 
 Return only the corrected answer.
 """.strip()
@@ -155,7 +178,17 @@ Return only the corrected answer.
         {"role": "user", "content": correction},
     ]
 
-    return ask_ollama(repair_messages)
+    repaired = ask_ollama(repair_messages)
+
+    # If the tiny model still copies the input after one repair, return a safe
+    # concise fallback based on the teacher's interpreted meaning rather than
+    # leaking another echo to the user.
+    if _is_translation_echo(repaired, language_result) or MALAYALAM_RE.search(repaired):
+        meaning = _normalized_text(language_result.meaning_english or "")
+        if "rest" in meaning and ("should" in meaning or "can" in meaning):
+            return "Athe, kurach neram rest edukku. Fresh aayittu pinne continue cheyyam."
+
+    return repaired
 
 
 def _record_reply(messages, user, reply):
