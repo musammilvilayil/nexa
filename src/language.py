@@ -23,21 +23,31 @@ MANGGLISH_HINTS = {
     "alla",
     "entha",
     "enthu",
+    "enth",
     "ente",
+    "enne",
     "njan",
     "njn",
     "namukku",
     "nammal",
+    "nammalk",
+    "ini",
     "ippo",
     "ivide",
     "avide",
     "cheyyam",
+    "cheyyum",
     "cheyyande",
     "cheyyanam",
+    "cheyyalo",
+    "cheythalo",
+    "edukkatte",
+    "edukkam",
     "parayatte",
     "parayu",
     "venam",
     "venda",
+    "venamo",
     "sugam",
     "orma",
     "vecholu",
@@ -46,13 +56,42 @@ MANGGLISH_HINTS = {
     "kazhinju",
     "undo",
     "ille",
+    "pattum",
     "pattumo",
     "mathi",
     "oru",
     "ith",
     "athu",
     "ithu",
+    "kurach",
+    "valare",
+    "ravile",
+    "nerathe",
+    "thudangam",
 }
+
+# Common Romanized-Malayalam endings. These are used only as an additional
+# signal; one suffix alone is not enough to classify an English sentence as
+# Manglish.
+MANGGLISH_SUFFIXES = (
+    "aano",
+    "aanu",
+    "alle",
+    "allo",
+    "illa",
+    "undo",
+    "umo",
+    "amo",
+    "atte",
+    "alo",
+    "ikkam",
+    "ikkatte",
+    "anam",
+    "ende",
+    "enda",
+    "unnu",
+    "um",
+)
 
 # High-confidence local phrases are the first layer of the student. Teacher
 # lessons learned later are stored in SQLite and become another local layer.
@@ -127,19 +166,46 @@ def detect_language(text):
 
     distinctive = {
         "entha",
+        "enthu",
+        "enth",
         "ente",
+        "enne",
         "njan",
         "njn",
+        "nammal",
+        "namukku",
+        "nammalk",
         "aanu",
         "aano",
         "ahno",
         "sugam",
         "cheyyande",
+        "cheyyanam",
+        "cheyyum",
+        "cheyyalo",
+        "cheythalo",
+        "edukkatte",
         "parayatte",
         "vecholu",
     }
 
-    if hint_count >= 2 or any(token in distinctive for token in tokens):
+    suffix_count = 0
+    for token in tokens:
+        for suffix in MANGGLISH_SUFFIXES:
+            if token.endswith(suffix) and len(token) >= len(suffix) + 2:
+                suffix_count += 1
+                break
+
+    # Two lexical hints are strong enough on their own. A single known hint can
+    # also be combined with a Malayalam-looking word ending. Distinctive words
+    # immediately classify the phrase so short conversational prompts such as
+    # "nammal ini enth cheyyum" and "oru platform build cheythalo" reach the
+    # teacher/student pipeline instead of being mistaken for English.
+    if (
+        hint_count >= 2
+        or any(token in distinctive for token in tokens)
+        or (hint_count >= 1 and suffix_count >= 1)
+    ):
         return "manglish"
 
     return "english"
