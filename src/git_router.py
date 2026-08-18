@@ -6,17 +6,15 @@ from git_skill import GitResult, GitSkill, GitSkillError
 from skill_registry import handle_skill_command
 
 
+BRANCH_TOKEN = r"[A-Za-z0-9][A-Za-z0-9._/-]{0,127}"
+
+
 def _normalize(text: str) -> str:
     return re.sub(r"[^a-z0-9/]+", " ", text.lower()).strip()
 
 
 def _extract_commit_message(text: str) -> str | None:
-    """Extract a user-supplied commit message without inventing one.
-
-    Quoted messages are preferred because they make the boundary explicit.
-    A small natural-language fallback is supported for `commit message X vechu
-    commit cheyyu`, but placeholder values are rejected.
-    """
+    """Extract a user-supplied commit message without inventing one."""
     quoted = re.search(r'["\']([^"\']+)["\']', text)
     if quoted:
         message = quoted.group(1).strip()
@@ -33,13 +31,33 @@ def _extract_commit_message(text: str) -> str | None:
     return message
 
 
-def detect_git_intent(text: str) -> str | None:
-    """Map explicit Git/repository requests to reviewed GitSkill operations.
+def _extract_branch_name(text: str, action: str) -> str | None:
+    """Extract an explicitly supplied branch name for create/switch intents."""
+    raw = " ".join(text.strip().split())
 
-    The router is intentionally conservative. General conversation never becomes
-    a shell command; only recognized Git intents can reach the allow-listed
-    GitSkill methods.
-    """
+    if action == "create":
+        patterns = (
+            rf"(?:create|new)\s+branch\s+[\"']?({BRANCH_TOKEN})[\"']?",
+            rf"branch\s+[\"']?({BRANCH_TOKEN})[\"']?\s+(?:create|undakku|undakkuu)",
+            rf"[\"']?({BRANCH_TOKEN})[\"']?\s+branch\s+(?:create|undakku|undakkuu)",
+        )
+    else:
+        patterns = (
+            rf"(?:switch|checkout)\s+(?:to\s+)?branch\s+[\"']?({BRANCH_TOKEN})[\"']?",
+            rf"branch\s+[\"']?({BRANCH_TOKEN})[\"']?\s+(?:switch|checkout)",
+            rf"[\"']?({BRANCH_TOKEN})[\"']?\s+branchilek\s+(?:switch|checkout)",
+            rf"[\"']?({BRANCH_TOKEN})[\"']?\s+branch\s+(?:switch|checkout)",
+        )
+
+    for pattern in patterns:
+        match = re.search(pattern, raw, flags=re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
+
+def detect_git_intent(text: str) -> str | None:
+    """Map explicit Git/repository requests to reviewed GitSkill operations."""
     normalized = _normalize(text)
 
     if not normalized:
@@ -72,6 +90,23 @@ def detect_git_intent(text: str) -> str | None:
     }
     if normalized in pull_phrases:
         return "pull"
+
+    conflict_phrases = {
+        "/git conflicts",
+        "git conflicts",
+        "git conflicts nokku",
+        "conflicts nokku",
+        "conflict files nokku",
+        "repo conflicts nokku",
+    }
+    if normalized in conflict_phrases:
+        return "conflicts"
+
+    if _extract_branch_name(text, "create"):
+        return "create_branch"
+
+    if _extract_branch_name(text, "switch"):
+        return "switch_branch"
 
     branch_phrases = {
         "/git branch",
@@ -156,6 +191,14 @@ def _working_tree_dirty(status_output: str) -> bool:
     return True
 
 
+def _conflict_files(skill: GitSkill) -> tuple[str | None, str | None]:
+    result = skill.conflict_files()
+    if not result.ok:
+        return None, _result_text(result, "unknown error")
+    conflicts = result.stdout.strip()
+    return conflicts, None
+
+
 def handle_git_command(text: str, skill: GitSkill) -> str | None:
     # Temporary shared deterministic router: skill-registry queries are handled
     # here before Git intent detection so the LLM cannot invent capabilities.
@@ -173,6 +216,62 @@ def handle_git_command(text: str, skill: GitSkill) -> str | None:
             if not result.ok:
                 return "Git status failed: " + _result_text(result, "unknown error")
             return "Git status:\n" + _result_text(result, "working tree clean")
+
+        if intent == "conflicts":
+            conflicts, error = _conflict_files(skill)
+            if error:
+                return "Git conflict check failed: " + error
+            if conflicts:
+                return "Unresolved Git conflict files:\n" + conflicts
+            return "Git conflicts onnum illa."
+
+        if intent == "create_branch":
+            branch = _extract_branch_name(text, "create")
+            if not branch:
+                return "Create cheyyenda branch name clear alla."
+
+            conflicts, error = _conflict_files(skill)
+            if error:
+                return "Branch create cheyyunnathinu munpe conflict check fail aayi: " + error
+            if conflicts:
+                return "Unresolved Git conflicts undu; new branch create cheythilla:\n" + conflicts
+
+            status = skill.status()
+            if not status.ok:
+                return "Branch create cheyyunnathinu munpe status check fail aayi: " + _result_text(
+                    status, "unknown error"
+                )
+            if _working_tree_dirty(status.stdout):
+                return "Local changes undu. Safety reason kond new branch create cheythilla."
+
+            result = skill.create_branch(branch)
+            if not result.ok:
+                return "Git branch create failed: " + _result_text(result, "unknown error")
+            return f"Git branch created and switched: {branch}"
+
+        if intent == "switch_branch":
+            branch = _extract_branch_name(text, "switch")
+            if not branch:
+                return "Switch cheyyenda branch name clear alla."
+
+            conflicts, error = _conflict_files(skill)
+            if error:
+                return "Branch switch cheyyunnathinu munpe conflict check fail aayi: " + error
+            if conflicts:
+                return "Unresolved Git conflicts undu; branch switch cheythilla:\n" + conflicts
+
+            status = skill.status()
+            if not status.ok:
+                return "Branch switch cheyyunnathinu munpe status check fail aayi: " + _result_text(
+                    status, "unknown error"
+                )
+            if _working_tree_dirty(status.stdout):
+                return "Local changes undu. Safety reason kond branch switch cheythilla."
+
+            result = skill.switch_branch(branch)
+            if not result.ok:
+                return "Git branch switch failed: " + _result_text(result, "unknown error")
+            return f"Git branch switched: {branch}"
 
         if intent == "branch":
             result = skill.current_branch()
@@ -194,6 +293,12 @@ def handle_git_command(text: str, skill: GitSkill) -> str | None:
             return "Git diff:\n" + _result_text(result, "No unstaged changes.")
 
         if intent == "stage":
+            conflicts, error = _conflict_files(skill)
+            if error:
+                return "Stage cheyyunnathinu munpe conflict check fail aayi: " + error
+            if conflicts:
+                return "Unresolved Git conflicts undu. NEXA automatic stage cheythilla:\n" + conflicts
+
             status = skill.status()
             if not status.ok:
                 return "Stage cheyyunnathinu munpe status check fail aayi: " + _result_text(
@@ -215,6 +320,12 @@ def handle_git_command(text: str, skill: GitSkill) -> str | None:
                     "vechu commit cheyyu"
                 )
 
+            conflicts, error = _conflict_files(skill)
+            if error:
+                return "Commitinu munpe conflict check fail aayi: " + error
+            if conflicts:
+                return "Unresolved Git conflicts undu. NEXA commit cheythilla:\n" + conflicts
+
             staged = skill.diff(staged=True)
             if not staged.ok:
                 return "Staged changes check failed: " + _result_text(staged, "unknown error")
@@ -227,6 +338,12 @@ def handle_git_command(text: str, skill: GitSkill) -> str | None:
             return "Git commit complete:\n" + _result_text(result, "Commit created.")
 
         if intent == "push":
+            conflicts, error = _conflict_files(skill)
+            if error:
+                return "Pushinu munpe conflict check fail aayi: " + error
+            if conflicts:
+                return "Unresolved Git conflicts undu. NEXA push cheythilla:\n" + conflicts
+
             branch_result = skill.current_branch()
             if not branch_result.ok or not branch_result.stdout.strip():
                 return "Current branch kandupidikkan pattiyilla; push cheythilla."
@@ -238,6 +355,12 @@ def handle_git_command(text: str, skill: GitSkill) -> str | None:
             return "Git push complete:\n" + _result_text(result, "Push completed.")
 
         if intent == "pull":
+            conflicts, error = _conflict_files(skill)
+            if error:
+                return "Pullinu munpe conflict check fail aayi: " + error
+            if conflicts:
+                return "Unresolved Git conflicts undu. NEXA pull cheythilla:\n" + conflicts
+
             status = skill.status()
             if not status.ok:
                 return "Pullinu munpe Git status check fail aayi: " + _result_text(
