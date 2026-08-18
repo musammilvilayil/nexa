@@ -18,6 +18,7 @@ from memory import (
     search_memory,
     set_fact,
 )
+from skill_registry import handle_skill_command
 
 MODEL = "qwen3:1.7b"
 OLLAMA_URL = "http://localhost:11434/api/chat"
@@ -221,7 +222,7 @@ def main():
 
     print(
         "NEXA ONLINE - Auto Memory + Teacher-Student + Git Operator Enabled. "
-        "Type /teacher-stats, /git status, /git pull, or /exit.\n"
+        "Type /skills, /teacher-stats, /git status, /git pull, or /exit.\n"
     )
 
     while True:
@@ -236,6 +237,14 @@ def main():
             continue
 
         if not user:
+            continue
+
+        # Skill self-description must come from the deterministic registry, not
+        # from the LLM, so NEXA never invents capabilities it does not have.
+        skill_reply = handle_skill_command(user)
+        if skill_reply is not None:
+            save_message("user", user)
+            _record_reply(messages, user, skill_reply)
             continue
 
         # Deterministic tool routing happens before the LLM. Only recognized
