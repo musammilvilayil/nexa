@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from git_skill import GitResult, GitSkill, GitSkillError
+from skill_registry import handle_skill_command
 
 
 def _normalize(text: str) -> str:
@@ -128,8 +129,6 @@ def detect_git_intent(text: str) -> str | None:
     if normalized in push_phrases:
         return "push"
 
-    # Commit is recognized only when the user explicitly says commit. The
-    # handler still requires a real user-supplied message before mutating Git.
     if "commit" in normalized.split() and (
         normalized == "commit"
         or normalized.endswith("commit cheyyu")
@@ -143,7 +142,6 @@ def detect_git_intent(text: str) -> str | None:
 
 def _result_text(result: GitResult, success_fallback: str) -> str:
     text = result.stdout or result.stderr or success_fallback
-    # Keep terminal-sized output manageable for the chat shell.
     if len(text) > 4000:
         text = text[:4000].rstrip() + "\n... output truncated ..."
     return text
@@ -153,16 +151,18 @@ def _working_tree_dirty(status_output: str) -> bool:
     lines = [line for line in status_output.splitlines() if line.strip()]
     if not lines:
         return False
-
-    # `git status --short --branch` starts with `## ...`; every later line is a
-    # local working-tree/index change or untracked file.
     if lines[0].startswith("##"):
         return len(lines) > 1
-
     return True
 
 
 def handle_git_command(text: str, skill: GitSkill) -> str | None:
+    # Temporary shared deterministic router: skill-registry queries are handled
+    # here before Git intent detection so the LLM cannot invent capabilities.
+    skill_reply = handle_skill_command(text)
+    if skill_reply is not None:
+        return skill_reply
+
     intent = detect_git_intent(text)
     if intent is None:
         return None
