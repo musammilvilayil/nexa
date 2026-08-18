@@ -55,6 +55,36 @@ MANGGLISH_HINTS = {
     "ithu",
 }
 
+# High-confidence local phrases. This gives the small local model clean intent
+# even when Gemini is unavailable. We will later replace/expand this with a
+# proper transliteration model and learned correction dataset.
+LOCAL_MANGGLISH_PHRASES = {
+    "nammal ippo entha cheyyande": (
+        "നമ്മൾ ഇപ്പോൾ എന്താ ചെയ്യേണ്ടത്?",
+        "What should we do now?",
+    ),
+    "sugam ahno": (
+        "സുഖമാണോ?",
+        "How are you?",
+    ),
+    "sugam aano": (
+        "സുഖമാണോ?",
+        "How are you?",
+    ),
+    "ente favourite color entha": (
+        "എന്റെ ഇഷ്ട നിറം എന്താണ്?",
+        "What is my favorite color?",
+    ),
+    "ente favorite color entha": (
+        "എന്റെ ഇഷ്ട നിറം എന്താണ്?",
+        "What is my favorite color?",
+    ),
+    "ith orma vecholu": (
+        "ഇത് ഓർമ്മ വെച്ചോളൂ.",
+        "Remember this.",
+    ),
+}
+
 
 @dataclass
 class LanguageResult:
@@ -81,7 +111,7 @@ class LanguageResult:
             parts.append(f"English meaning: {self.meaning_english}")
 
         parts.append(
-            "Understand the intended Malayalam meaning. Reply naturally in Manglish unless the user asks for another language."
+            "Answer the intended meaning, not the wording. Reply naturally in Manglish unless the user asks for another language."
         )
         return "\n".join(parts)
 
@@ -97,7 +127,6 @@ def detect_language(text):
 
     hint_count = sum(1 for token in tokens if token in MANGGLISH_HINTS)
 
-    # One very distinctive token is enough for a short message.
     distinctive = {
         "entha",
         "ente",
@@ -116,6 +145,28 @@ def detect_language(text):
         return "manglish"
 
     return "english"
+
+
+def _phrase_key(text):
+    words = WORD_RE.findall(text.lower())
+    return " ".join(words)
+
+
+def _local_phrase_normalize(text):
+    match = LOCAL_MANGGLISH_PHRASES.get(_phrase_key(text))
+
+    if not match:
+        return None
+
+    normalized_malayalam, meaning_english = match
+    return LanguageResult(
+        original=text,
+        detected_language="manglish",
+        normalized_malayalam=normalized_malayalam,
+        meaning_english=meaning_english,
+        confidence=0.99,
+        provider="local-phrase",
+    )
 
 
 def _parse_json_text(text):
@@ -222,6 +273,11 @@ def prepare_user_input(text):
             provider="local-detector",
         )
 
+    # Use deterministic local interpretations first when we know the phrase.
+    local_result = _local_phrase_normalize(text)
+    if local_result:
+        return local_result
+
     cached = get_language_cache(text)
 
     if cached and cached["provider"].startswith("gemini:"):
@@ -250,8 +306,8 @@ def prepare_user_input(text):
         )
         return result
 
-    # Safe local fallback: do not guess a transliteration. Preserve the raw text and
-    # add explicit context for the local LLM instead.
+    # Safe local fallback: preserve raw text and clearly tell the local model that
+    # this is Manglish instead of inventing a low-confidence transliteration.
     return LanguageResult(
         original=text,
         detected_language="manglish",
