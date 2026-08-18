@@ -5,6 +5,8 @@ import httpx
 from language import prepare_user_input
 from memory import (
     extract_fact,
+    get_fact,
+    identify_fact_query,
     init_db,
     load_recent_messages,
     resolve_fact_query,
@@ -37,6 +39,7 @@ Memory rules:
 - Use retrieved memory when it contains the answer.
 - Do not ask for information already present in memory.
 - Preserve user facts accurately.
+- If a requested personal fact is not stored, say that it is not stored instead of guessing.
 """.strip()
 
 
@@ -75,6 +78,36 @@ def _is_translation_echo(reply, language_result):
             return True
 
     return False
+
+
+def _missing_fact_reply(key):
+    replies = {
+        "name": "Ninte peru ithuvare memory-il save cheythittilla.",
+        "favourite_color": "Ninte favourite color ithuvare memory-il save cheythittilla.",
+    }
+    return replies.get(key, "Aa detail ithuvare memory-il save cheythittilla.")
+
+
+def _contextual_next_step_reply(language_result, relevant_memory):
+    if relevant_memory:
+        return None
+
+    meaning = _normalized_text(language_result.meaning_english or "")
+    original = _normalized_text(language_result.original)
+
+    next_step_questions = {
+        "what should we do now",
+        "what do we do now",
+        "nammal ippo entha cheyyande",
+    }
+
+    if meaning in next_step_questions or original in next_step_questions:
+        return (
+            "Ippo exact task context enikku memory-il illa. "
+            "Eth task/project aanu continue cheyyendath enn parayu."
+        )
+
+    return None
 
 
 def repair_manglish_reply(reply, language_result, messages):
@@ -124,6 +157,13 @@ Return only the corrected answer.
     return ask_ollama(repair_messages)
 
 
+def _record_reply(messages, user, reply):
+    save_message("assistant", reply)
+    messages.append({"role": "user", "content": user})
+    messages.append({"role": "assistant", "content": reply})
+    print(f"\nNEXA: {reply}\n")
+
+
 def main():
     init_db()
 
@@ -152,29 +192,28 @@ def main():
             key, value = new_fact
             set_fact(key, value)
             reply = f"Orma vechu: {key} = {value}"
-
-            save_message("assistant", reply)
-            messages.append({"role": "user", "content": user})
-            messages.append({"role": "assistant", "content": reply})
-
-            print(f"\nNEXA: {reply}\n")
+            _record_reply(messages, user, reply)
             continue
 
-        # 2. Resolve known facts deterministically before asking an LLM.
+        # 2. Handle explicit personal-fact questions deterministically. Manglish
+        # aliases such as "peru" map to the stored "name" key.
+        fact_key = identify_fact_query(user)
+
+        if fact_key:
+            value = get_fact(fact_key)
+            reply = value if value is not None else _missing_fact_reply(fact_key)
+            _record_reply(messages, user, reply)
+            continue
+
+        # 3. Resolve any remaining known facts conservatively.
         fact = resolve_fact_query(user)
 
         if fact:
             _, value = fact
-            reply = value
-
-            save_message("assistant", reply)
-            messages.append({"role": "user", "content": user})
-            messages.append({"role": "assistant", "content": reply})
-
-            print(f"\nNEXA: {reply}\n")
+            _record_reply(messages, user, value)
             continue
 
-        # 3. Retrieve relevant conversational memory using the original text.
+        # 4. Retrieve relevant conversational memory using the original text.
         relevant = search_memory(user, limit=5)
         memory_context = ""
 
@@ -184,19 +223,22 @@ def main():
             for item in relevant:
                 memory_context += f"- {item['role']}: {item['content']}\n"
 
-        # 4. Normalize/annotate the user's language before local reasoning.
+        # 5. Normalize/annotate the user's language before local reasoning.
         language_result = prepare_user_input(user)
+
+        # Some questions are impossible to answer usefully without task context.
+        # Say so instead of producing a vague agreement such as "Athe, ath cheyyam."
+        context_reply = _contextual_next_step_reply(language_result, relevant)
+
+        if context_reply:
+            _record_reply(messages, user, context_reply)
+            continue
+
         model_input = language_result.model_text()
-
-        current_message = (
-            memory_context
-            + "\nCurrent user message:\n"
-            + model_input
-        )
-
+        current_message = memory_context + "\nCurrent user message:\n" + model_input
         messages.append({"role": "user", "content": current_message})
 
-        # 5. Ask the local model.
+        # 6. Ask the local model.
         try:
             reply = ask_ollama(messages)
             reply = repair_manglish_reply(reply, language_result, messages)
