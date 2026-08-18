@@ -9,6 +9,29 @@ def _normalize(text: str) -> str:
     return re.sub(r"[^a-z0-9/]+", " ", text.lower()).strip()
 
 
+def _extract_commit_message(text: str) -> str | None:
+    """Extract a user-supplied commit message without inventing one.
+
+    Quoted messages are preferred because they make the boundary explicit.
+    A small natural-language fallback is supported for `commit message X vechu
+    commit cheyyu`, but placeholder values are rejected.
+    """
+    quoted = re.search(r'["\']([^"\']+)["\']', text)
+    if quoted:
+        message = quoted.group(1).strip()
+    else:
+        match = re.search(
+            r"commit\s+message\s+(.+?)\s+(?:vechu|vachu|with)\s+commit(?:\s+cheyyu)?\s*$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        message = match.group(1).strip() if match else ""
+
+    if not message or message in {"...", "..", "."}:
+        return None
+    return message
+
+
 def detect_git_intent(text: str) -> str | None:
     """Map explicit Git/repository requests to reviewed GitSkill operations.
 
@@ -74,9 +97,46 @@ def detect_git_intent(text: str) -> str | None:
         "git diff",
         "repo changes",
         "repo changes nokku",
+        "changes nokku",
+        "changes check cheyyu",
+        "entha changes ullath",
     }
     if normalized in diff_phrases:
         return "diff"
+
+    stage_phrases = {
+        "/git stage",
+        "git stage",
+        "git stage cheyyu",
+        "changes stage cheyyu",
+        "ellam stage cheyyu",
+        "all changes stage cheyyu",
+        "ith stage cheyyu",
+    }
+    if normalized in stage_phrases:
+        return "stage"
+
+    push_phrases = {
+        "/git push",
+        "git push",
+        "git push cheyyu",
+        "push cheyyu",
+        "githubilek push cheyyu",
+        "githubil push cheyyu",
+        "changes push cheyyu",
+    }
+    if normalized in push_phrases:
+        return "push"
+
+    # Commit is recognized only when the user explicitly says commit. The
+    # handler still requires a real user-supplied message before mutating Git.
+    if "commit" in normalized.split() and (
+        normalized == "commit"
+        or normalized.endswith("commit cheyyu")
+        or normalized.startswith("commit message ")
+        or normalized.startswith("git commit")
+    ):
+        return "commit"
 
     return None
 
@@ -132,6 +192,50 @@ def handle_git_command(text: str, skill: GitSkill) -> str | None:
             if not result.ok:
                 return "Git diff failed: " + _result_text(result, "unknown error")
             return "Git diff:\n" + _result_text(result, "No unstaged changes.")
+
+        if intent == "stage":
+            status = skill.status()
+            if not status.ok:
+                return "Stage cheyyunnathinu munpe status check fail aayi: " + _result_text(
+                    status, "unknown error"
+                )
+            if not _working_tree_dirty(status.stdout):
+                return "Stage cheyyan local changes onnum illa."
+
+            result = skill.stage(".")
+            if not result.ok:
+                return "Git stage failed: " + _result_text(result, "unknown error")
+            return "Current repository changes staged successfully."
+
+        if intent == "commit":
+            message = _extract_commit_message(text)
+            if not message:
+                return (
+                    'Commit message clear alla. Example: commit message "fix git router" '
+                    "vechu commit cheyyu"
+                )
+
+            staged = skill.diff(staged=True)
+            if not staged.ok:
+                return "Staged changes check failed: " + _result_text(staged, "unknown error")
+            if not staged.stdout.strip():
+                return "Commit cheyyan staged changes onnum illa. Aadyam changes stage cheyyu."
+
+            result = skill.commit(message)
+            if not result.ok:
+                return "Git commit failed: " + _result_text(result, "unknown error")
+            return "Git commit complete:\n" + _result_text(result, "Commit created.")
+
+        if intent == "push":
+            branch_result = skill.current_branch()
+            if not branch_result.ok or not branch_result.stdout.strip():
+                return "Current branch kandupidikkan pattiyilla; push cheythilla."
+
+            branch = branch_result.stdout.strip()
+            result = skill.push(branch)
+            if not result.ok:
+                return "Git push failed: " + _result_text(result, "unknown error")
+            return "Git push complete:\n" + _result_text(result, "Push completed.")
 
         if intent == "pull":
             status = skill.status()
