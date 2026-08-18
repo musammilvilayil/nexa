@@ -15,19 +15,23 @@ def result(*args, stdout="", stderr="", returncode=0):
 
 
 class FakeGitSkill:
-    def __init__(self, status_stdout="## main...origin/main"):
+    def __init__(self, status_stdout="## main...origin/main", conflict_stdout=""):
         self.status_stdout = status_stdout
+        self.conflict_stdout = conflict_stdout
         self.pull_calls = []
         self.stage_calls = []
         self.commit_calls = []
         self.push_calls = []
+        self.create_branch_calls = []
+        self.switch_branch_calls = []
         self.staged_diff_stdout = ""
+        self.current_branch_name = "main"
 
     def status(self):
         return result("status", stdout=self.status_stdout)
 
     def current_branch(self):
-        return result("branch", stdout="main")
+        return result("branch", stdout=self.current_branch_name)
 
     def history(self, limit=5):
         return result("log", stdout="abc123 latest commit")
@@ -37,9 +41,22 @@ class FakeGitSkill:
             return result("diff", "--cached", stdout=self.staged_diff_stdout)
         return result("diff", stdout="")
 
+    def conflict_files(self):
+        return result("diff", "--name-only", "--diff-filter=U", stdout=self.conflict_stdout)
+
     def pull_ff_only(self, branch, remote="origin"):
         self.pull_calls.append((branch, remote))
         return result("pull", stdout="Already up to date.")
+
+    def create_branch(self, branch):
+        self.create_branch_calls.append(branch)
+        self.current_branch_name = branch
+        return result("switch", "-c", branch, stdout=f"Switched to a new branch '{branch}'")
+
+    def switch_branch(self, branch):
+        self.switch_branch_calls.append(branch)
+        self.current_branch_name = branch
+        return result("switch", branch, stdout=f"Switched to branch '{branch}'")
 
     def stage(self, path="."):
         self.stage_calls.append(path)
@@ -86,6 +103,7 @@ class GitRouterTests(unittest.TestCase):
         self.assertIn("abc123", handle_git_command("recent commits", skill))
         self.assertIn("No unstaged changes", handle_git_command("git diff", skill))
         self.assertIn("No unstaged changes", handle_git_command("changes nokku", skill))
+        self.assertIn("conflicts onnum illa", handle_git_command("conflicts nokku", skill))
 
     def test_stage_all_requires_local_changes(self):
         clean = FakeGitSkill()
@@ -117,6 +135,50 @@ class GitRouterTests(unittest.TestCase):
         self.assertEqual(skill.push_calls, [("main", "origin", False)])
         self.assertIn("Git push complete", reply)
 
+    def test_branch_create_and_switch_intents(self):
+        self.assertEqual(detect_git_intent("test-safe branch create cheyyu"), "create_branch")
+        self.assertEqual(detect_git_intent("test-safe branchilek switch cheyyu"), "switch_branch")
+
+        skill = FakeGitSkill()
+        reply = handle_git_command("test-safe branch create cheyyu", skill)
+        self.assertEqual(skill.create_branch_calls, ["test-safe"])
+        self.assertIn("created and switched", reply)
+
+        reply = handle_git_command("main branchilek switch cheyyu", skill)
+        self.assertEqual(skill.switch_branch_calls, ["main"])
+        self.assertIn("branch switched", reply)
+
+    def test_dirty_tree_blocks_branch_mutation(self):
+        skill = FakeGitSkill("## main...origin/main\n M README.md")
+        reply = handle_git_command("test-safe branch create cheyyu", skill)
+        self.assertEqual(skill.create_branch_calls, [])
+        self.assertIn("Local changes undu", reply)
+
+        reply = handle_git_command("main branchilek switch cheyyu", skill)
+        self.assertEqual(skill.switch_branch_calls, [])
+        self.assertIn("Local changes undu", reply)
+
+    def test_conflicts_block_mutating_git_actions(self):
+        skill = FakeGitSkill(conflict_stdout="src/nexa.py")
+
+        self.assertIn("src/nexa.py", handle_git_command("conflicts nokku", skill))
+        self.assertIn("conflicts undu", handle_git_command("git pull cheyyu", skill))
+        self.assertIn("conflicts undu", handle_git_command("ith stage cheyyu", skill))
+        self.assertIn(
+            "conflicts undu",
+            handle_git_command('commit message "resolve later" vechu commit cheyyu', skill),
+        )
+        self.assertIn("conflicts undu", handle_git_command("githubilek push cheyyu", skill))
+        self.assertIn("conflicts undu", handle_git_command("test-safe branch create cheyyu", skill))
+        self.assertIn("conflicts undu", handle_git_command("main branchilek switch cheyyu", skill))
+
+        self.assertEqual(skill.pull_calls, [])
+        self.assertEqual(skill.stage_calls, [])
+        self.assertEqual(skill.commit_calls, [])
+        self.assertEqual(skill.push_calls, [])
+        self.assertEqual(skill.create_branch_calls, [])
+        self.assertEqual(skill.switch_branch_calls, [])
+
     def test_new_natural_language_intents_are_detected(self):
         self.assertEqual(detect_git_intent("changes nokku"), "diff")
         self.assertEqual(detect_git_intent("ith stage cheyyu"), "stage")
@@ -125,6 +187,7 @@ class GitRouterTests(unittest.TestCase):
             "commit",
         )
         self.assertEqual(detect_git_intent("githubilek push cheyyu"), "push")
+        self.assertEqual(detect_git_intent("conflicts nokku"), "conflicts")
 
 
 if __name__ == "__main__":
