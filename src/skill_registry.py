@@ -47,13 +47,17 @@ INSTALLED_SKILLS = (
 )
 
 
+# Accept the correct spelling (`skill`/`skills`) and the common user typo
+# (`skil`/`skils`) so the deterministic registry still catches the request.
+SKILL_WORD = r"(?:skills?|skils?)"
+
 SKILL_LIST_PATTERNS = (
     re.compile(r"^/skills$", re.IGNORECASE),
-    re.compile(r"^skills?\s+list(?:\s+cheyyu|\s+cheythe|\s+cheyyamo)?$", re.IGNORECASE),
-    re.compile(r"^ninte\s+skills?\s+list(?:\s+cheyyu|\s+cheythe|\s+cheyya)?$", re.IGNORECASE),
-    re.compile(r"^nexa(?:yude)?\s+skills?\s+list(?:\s+cheyyu|\s+cheythe|\s+cheyya)?$", re.IGNORECASE),
-    re.compile(r"^enthoke\s+skills?\s+undu\??$", re.IGNORECASE),
-    re.compile(r"^enthokke\s+skills?\s+undu\??$", re.IGNORECASE),
+    re.compile(rf"^{SKILL_WORD}\s+list(?:\s+cheyyu|\s+cheythe|\s+cheyyamo)?$", re.IGNORECASE),
+    re.compile(rf"^ninte\s+{SKILL_WORD}\s+list(?:\s+cheyyu|\s+cheythe|\s+cheyya)?$", re.IGNORECASE),
+    re.compile(rf"^nexa(?:yude)?\s+{SKILL_WORD}\s+list(?:\s+cheyyu|\s+cheythe|\s+cheyya)?$", re.IGNORECASE),
+    re.compile(rf"^enthoke\s+{SKILL_WORD}\s+undu\??$", re.IGNORECASE),
+    re.compile(rf"^enthokke\s+{SKILL_WORD}\s+undu\??$", re.IGNORECASE),
 )
 
 
