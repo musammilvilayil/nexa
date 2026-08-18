@@ -1,3 +1,5 @@
+import re
+
 import httpx
 
 from language import prepare_user_input
@@ -13,6 +15,7 @@ from memory import (
 
 MODEL = "qwen3:1.7b"
 OLLAMA_URL = "http://localhost:11434/api/chat"
+MALAYALAM_RE = re.compile(r"[\u0D00-\u0D7F]")
 
 SYSTEM_PROMPT = """
 You are NEXA, a local personal AI assistant.
@@ -21,10 +24,13 @@ Be accurate, helpful, concise, and technical when needed.
 You understand English, Malayalam, and Manglish.
 
 Language rules:
-- Manglish means Malayalam written using Latin letters.
-- When the user writes Manglish, understand the Malayalam meaning and normally reply in natural Manglish.
-- Do not translate literally when a natural Malayalam meaning is clear.
-- If the language layer provides normalized Malayalam or an English meaning, use it as interpretation help while preserving the user's intent.
+- Manglish means Malayalam spoken language written using Latin letters.
+- When the user writes Manglish, understand the Malayalam meaning and answer in natural Latin-script Manglish.
+- Do not output Malayalam Unicode/script for a Manglish user unless they explicitly ask for Malayalam script.
+- Normalized Malayalam and English meaning supplied by the language layer are interpretation metadata only.
+- Never answer by merely translating, echoing, or restating the current user message.
+- Answer the user's actual request or question directly.
+- If the language layer provides normalized Malayalam or an English meaning, use it only to understand intent.
 
 Memory rules:
 - Use retrieved memory when it contains the answer.
@@ -46,6 +52,38 @@ def ask_ollama(messages):
     )
     response.raise_for_status()
     return response.json()["message"]["content"]
+
+
+def repair_manglish_reply(reply, language_result, messages):
+    if language_result.detected_language != "manglish":
+        return reply
+
+    normalized = (language_result.normalized_malayalam or "").strip()
+    reply_clean = reply.strip()
+
+    used_malayalam_script = bool(MALAYALAM_RE.search(reply_clean))
+    merely_repeated_normalization = bool(
+        normalized and reply_clean.rstrip(".!?") == normalized.rstrip(".!?")
+    )
+
+    if not used_malayalam_script and not merely_repeated_normalization:
+        return reply
+
+    correction = """
+Your previous draft did not follow the response-language rule.
+Answer the ORIGINAL user's request directly now.
+Do not translate or repeat the user's question.
+Use natural Manglish written only with Latin letters (English words are fine when natural).
+Do not use Malayalam script.
+Return only the corrected answer.
+""".strip()
+
+    repair_messages = messages + [
+        {"role": "assistant", "content": reply},
+        {"role": "user", "content": correction},
+    ]
+
+    return ask_ollama(repair_messages)
 
 
 def main():
@@ -123,6 +161,7 @@ def main():
         # 5. Ask the local model.
         try:
             reply = ask_ollama(messages)
+            reply = repair_manglish_reply(reply, language_result, messages)
         except httpx.HTTPError as exc:
             reply = f"Local model error: {exc}"
 
