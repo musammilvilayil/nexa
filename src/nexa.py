@@ -6,6 +6,7 @@ from language import prepare_user_input
 from memory import (
     extract_fact,
     get_fact,
+    get_teacher_stats,
     identify_fact_query,
     init_db,
     load_recent_messages,
@@ -164,13 +165,26 @@ def _record_reply(messages, user, reply):
     print(f"\nNEXA: {reply}\n")
 
 
+def _print_teacher_stats():
+    stats = get_teacher_stats()
+    print(
+        "\nNEXA Teacher-Student: "
+        f"{stats['lessons']} learned lesson(s), "
+        f"{stats['reuses']} local reuse(s), "
+        f"avg teacher confidence {stats['average_confidence']:.2f}.\n"
+    )
+
+
 def main():
     init_db()
 
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages.extend(load_recent_messages(limit=12))
 
-    print("NEXA ONLINE - Auto Memory + Language Layer Enabled. Type /exit to quit.\n")
+    print(
+        "NEXA ONLINE - Auto Memory + Teacher-Student Language Layer Enabled. "
+        "Type /teacher-stats or /exit.\n"
+    )
 
     while True:
         user = input("You: ").strip()
@@ -179,13 +193,15 @@ def main():
             print("NEXA: Shutting down.")
             break
 
+        if user.lower() == "/teacher-stats":
+            _print_teacher_stats()
+            continue
+
         if not user:
             continue
 
-        # Keep the user's original words in permanent conversational memory.
         save_message("user", user)
 
-        # 1. Learn supported structured facts from the original message.
         new_fact = extract_fact(user)
 
         if new_fact:
@@ -195,8 +211,6 @@ def main():
             _record_reply(messages, user, reply)
             continue
 
-        # 2. Handle explicit personal-fact questions deterministically. Manglish
-        # aliases such as "peru" map to the stored "name" key.
         fact_key = identify_fact_query(user)
 
         if fact_key:
@@ -205,7 +219,6 @@ def main():
             _record_reply(messages, user, reply)
             continue
 
-        # 3. Resolve any remaining known facts conservatively.
         fact = resolve_fact_query(user)
 
         if fact:
@@ -213,7 +226,6 @@ def main():
             _record_reply(messages, user, value)
             continue
 
-        # 4. Retrieve relevant conversational memory using the original text.
         relevant = search_memory(user, limit=5)
         memory_context = ""
 
@@ -223,11 +235,8 @@ def main():
             for item in relevant:
                 memory_context += f"- {item['role']}: {item['content']}\n"
 
-        # 5. Normalize/annotate the user's language before local reasoning.
         language_result = prepare_user_input(user)
 
-        # Some questions are impossible to answer usefully without task context.
-        # Say so instead of producing a vague agreement such as "Athe, ath cheyyam."
         context_reply = _contextual_next_step_reply(language_result, relevant)
 
         if context_reply:
@@ -238,7 +247,6 @@ def main():
         current_message = memory_context + "\nCurrent user message:\n" + model_input
         messages.append({"role": "user", "content": current_message})
 
-        # 6. Ask the local model.
         try:
             reply = ask_ollama(messages)
             reply = repair_manglish_reply(reply, language_result, messages)
