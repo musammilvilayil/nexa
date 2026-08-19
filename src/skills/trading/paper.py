@@ -3,11 +3,12 @@ from __future__ import annotations
 from uuid import uuid4
 
 from .models import OrderStatus, PaperOrder, RiskSnapshot, TradeSide, TradeSignal, TradingMandate
+from .portfolio import PaperPortfolio
 from .risk import RiskEngine
 
 
 class PaperBroker:
-    """Local paper-only execution engine with simple fee and slippage modelling."""
+    """Local paper-only execution engine with fee, slippage, and portfolio state."""
 
     def __init__(
         self,
@@ -15,12 +16,14 @@ class PaperBroker:
         *,
         fee_bps: float = 2.0,
         slippage_bps: float = 1.0,
+        portfolio: PaperPortfolio | None = None,
     ) -> None:
         if fee_bps < 0 or slippage_bps < 0:
             raise ValueError("fee_bps and slippage_bps cannot be negative")
         self.risk_engine = risk_engine or RiskEngine()
         self.fee_bps = float(fee_bps)
         self.slippage_bps = float(slippage_bps)
+        self.portfolio = portfolio or PaperPortfolio()
         self._orders: list[PaperOrder] = []
 
     @property
@@ -32,9 +35,10 @@ class PaperBroker:
         signal: TradeSignal,
         quantity: int,
         mandate: TradingMandate,
-        snapshot: RiskSnapshot,
+        snapshot: RiskSnapshot | None = None,
     ) -> PaperOrder:
-        decision = self.risk_engine.evaluate(signal, quantity, mandate, snapshot)
+        effective_snapshot = snapshot or self.portfolio.snapshot({signal.symbol: signal.price})
+        decision = self.risk_engine.evaluate(signal, quantity, mandate, effective_snapshot)
         order_id = uuid4().hex[:12]
 
         if not decision.approved:
@@ -54,7 +58,7 @@ class PaperBroker:
 
         slip = signal.price * (self.slippage_bps / 10_000.0)
         fill_price = signal.price + slip if signal.side == TradeSide.BUY else signal.price - slip
-        fee = fill_price * quantity * (self.fee_bps / 10_000.0)
+        fee = fill_price * decision.approved_quantity * (self.fee_bps / 10_000.0)
 
         order = PaperOrder(
             order_id=order_id,
@@ -68,4 +72,11 @@ class PaperBroker:
             reason=decision.reason,
         )
         self._orders.append(order)
+        self.portfolio.apply_fill(
+            order.symbol,
+            order.side,
+            order.quantity,
+            fill_price,
+            fee,
+        )
         return order

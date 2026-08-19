@@ -41,12 +41,16 @@ class TradingMandate:
     min_signal_confidence: float = 0.55
     allow_short: bool = False
     require_stop_loss: bool = True
+    allowed_strategies: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         symbols = tuple(sorted({symbol.strip().upper() for symbol in self.allowed_symbols if symbol.strip()}))
         if not symbols:
             raise ValueError("allowed_symbols cannot be empty")
         object.__setattr__(self, "allowed_symbols", symbols)
+
+        strategies = tuple(sorted({item.strip() for item in self.allowed_strategies if item.strip()}))
+        object.__setattr__(self, "allowed_strategies", strategies)
 
         _positive_finite("max_notional_per_trade", self.max_notional_per_trade)
         _positive_finite("max_total_exposure", self.max_total_exposure)
@@ -93,6 +97,7 @@ class RiskSnapshot:
     realized_pnl_today: float = 0.0
     open_positions: int = 0
     open_symbols: tuple[str, ...] = ()
+    position_quantities: tuple[tuple[str, int], ...] = ()
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.total_exposure) or self.total_exposure < 0:
@@ -102,6 +107,23 @@ class RiskSnapshot:
         if self.open_positions < 0:
             raise ValueError("open_positions cannot be negative")
         object.__setattr__(self, "open_symbols", tuple(symbol.upper() for symbol in self.open_symbols))
+
+        normalized: list[tuple[str, int]] = []
+        seen: set[str] = set()
+        for symbol, quantity in self.position_quantities:
+            key = symbol.strip().upper()
+            if not key or key in seen or quantity == 0:
+                raise ValueError("invalid position_quantities entry")
+            seen.add(key)
+            normalized.append((key, int(quantity)))
+        object.__setattr__(self, "position_quantities", tuple(normalized))
+
+    def position_quantity(self, symbol: str) -> int:
+        key = symbol.strip().upper()
+        for current_symbol, quantity in self.position_quantities:
+            if current_symbol == key:
+                return quantity
+        return 0
 
 
 @dataclass(frozen=True)
