@@ -1,8 +1,19 @@
 """Trading-first NEXA skill package."""
 
 from .backtest import BacktestEngine, BacktestReport, BacktestTrade, EquityPoint
+from .data_provider import CSVMarketDataProvider, MarketDataProvider
 from .indicators import atr, ema, highest, lowest, sma, true_range
 from .journal import TradingJournal
+from .live import (
+    BrokerAdapter,
+    BrokerHealth,
+    LiveArmController,
+    LiveExecutionController,
+    LiveOrderRequest,
+    LiveOrderResult,
+    TradingKillSwitch,
+    mandate_fingerprint,
+)
 from .market import Candle, DataQualityReport, MarketSeries, validate_market_series
 from .metrics import PerformanceMetrics, calculate_metrics
 from .models import (
@@ -17,7 +28,16 @@ from .models import (
 )
 from .paper import PaperBroker
 from .portfolio import FillEffect, PaperPortfolio, Position
+from .promotion import (
+    PaperEvidence,
+    PromotionDecision,
+    PromotionPolicy,
+    StrategyPromotionGate,
+    StrategyPromotionStore,
+    StrategyStage,
+)
 from .regime import MarketRegime, RegimeConfig, RegimeDetector, RegimeReading
+from .research import ResearchWindowResult, StrategyResearchReport, TradingResearchPipeline
 from .risk import RiskEngine
 from .runtime import AutonomousPaperTrader, PaperCycleResult
 from .sizing import FixedRiskSizer
@@ -45,6 +65,9 @@ __all__ = [
     "BacktestEngine",
     "BacktestReport",
     "BacktestTrade",
+    "BrokerAdapter",
+    "BrokerHealth",
+    "CSVMarketDataProvider",
     "Candle",
     "DataQualityReport",
     "EquityPoint",
@@ -52,6 +75,11 @@ __all__ = [
     "EvaluationThresholds",
     "FillEffect",
     "FixedRiskSizer",
+    "LiveArmController",
+    "LiveExecutionController",
+    "LiveOrderRequest",
+    "LiveOrderResult",
+    "MarketDataProvider",
     "MarketRegime",
     "MarketSeries",
     "MeanReversionConfig",
@@ -60,23 +88,33 @@ __all__ = [
     "OrderStatus",
     "PaperBroker",
     "PaperCycleResult",
+    "PaperEvidence",
     "PaperOrder",
     "PaperPortfolio",
     "PerformanceMetrics",
     "Position",
+    "PromotionDecision",
+    "PromotionPolicy",
     "RegimeConfig",
     "RegimeDetector",
     "RegimeReading",
+    "ResearchWindowResult",
     "RiskDecision",
     "RiskEngine",
     "RiskSnapshot",
     "StrategyDecision",
     "StrategyEvaluator",
+    "StrategyPromotionGate",
+    "StrategyPromotionStore",
+    "StrategyResearchReport",
+    "StrategyStage",
     "TradeSide",
     "TradeSignal",
     "TradingJournal",
+    "TradingKillSwitch",
     "TradingMandate",
     "TradingMode",
+    "TradingResearchPipeline",
     "TradingSkill",
     "WalkForwardSplitter",
     "WalkForwardWindow",
@@ -85,6 +123,7 @@ __all__ = [
     "ema",
     "highest",
     "lowest",
+    "mandate_fingerprint",
     "sma",
     "true_range",
     "validate_market_series",
