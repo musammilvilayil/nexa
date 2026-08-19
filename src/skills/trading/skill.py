@@ -5,7 +5,7 @@ from typing import Any, Mapping
 
 from core import ExecutionResult, OperationSpec, RiskTier, SkillMatch, SkillMetadata
 
-from .models import RiskSnapshot, TradeSide, TradeSignal, TradingMandate
+from .models import TradeSide, TradeSignal, TradingMandate
 from .paper import PaperBroker
 
 
@@ -22,8 +22,8 @@ _PAPER_ORDER_RE = re.compile(
 class TradingSkill:
     """Trading plugin for the standalone NEXA kernel.
 
-    v0.1 deliberately exposes only inspection and paper execution. Live broker
-    execution is not registered yet, so no model or user phrase can reach it.
+    This stage exposes inspection and paper execution only. Live broker execution
+    remains absent from metadata and matching, so no text/model route can reach it.
     """
 
     def __init__(self, mandate: TradingMandate, paper_broker: PaperBroker | None = None) -> None:
@@ -31,18 +31,22 @@ class TradingSkill:
         self.paper_broker = paper_broker or PaperBroker()
         self.metadata = SkillMetadata(
             name="trading",
-            version="0.1.0",
-            description="Risk-gated trading research and paper execution",
+            version="0.2.0",
+            description="Risk-gated trading research and autonomous paper execution",
             operations=(
                 OperationSpec("status", "Inspect the active trading mandate", RiskTier.READ),
+                OperationSpec("portfolio", "Inspect paper positions and PnL", RiskTier.READ),
                 OperationSpec("paper_order", "Submit a simulated paper order", RiskTier.MUTATE),
             ),
         )
 
     def match(self, text: str, context: Mapping[str, Any]) -> SkillMatch | None:
         normalized = " ".join(text.strip().split())
-        if normalized.lower() in {"trading status", "trade status"}:
+        lowered = normalized.lower()
+        if lowered in {"trading status", "trade status"}:
             return SkillMatch("trading", "status")
+        if lowered in {"paper portfolio", "trading portfolio", "paper positions", "trade positions"}:
+            return SkillMatch("trading", "portfolio")
 
         match = _PAPER_ORDER_RE.fullmatch(normalized)
         if match is None:
@@ -70,7 +74,7 @@ class TradingSkill:
         params: Mapping[str, Any],
         context: Mapping[str, Any],
     ) -> Mapping[str, Any]:
-        if operation == "status":
+        if operation in {"status", "portfolio"}:
             return {}
         if operation != "paper_order":
             raise ValueError("unknown trading operation")
@@ -78,6 +82,8 @@ class TradingSkill:
         side = TradeSide(str(params.get("side", "")).lower())
         symbol = str(params.get("symbol", "")).strip().upper()
         quantity = int(params.get("quantity", 0))
+        if quantity <= 0:
+            raise ValueError("quantity must be positive")
         price = float(params.get("price", 0.0))
         stop_loss = float(params["stop_loss"]) if params.get("stop_loss") is not None else None
         take_profit = float(params["take_profit"]) if params.get("take_profit") is not None else None
@@ -93,7 +99,6 @@ class TradingSkill:
             stop_loss=stop_loss,
             take_profit=take_profit,
         )
-
         return {"signal": signal, "quantity": quantity}
 
     def execute(
@@ -109,22 +114,41 @@ class TradingSkill:
                 data={
                     "mode": self.mandate.mode.value,
                     "allowed_symbols": self.mandate.allowed_symbols,
+                    "allowed_strategies": self.mandate.allowed_strategies,
                     "max_notional_per_trade": self.mandate.max_notional_per_trade,
                     "max_total_exposure": self.mandate.max_total_exposure,
                     "max_risk_per_trade": self.mandate.max_risk_per_trade,
                     "max_daily_loss": self.mandate.max_daily_loss,
+                    "max_open_positions": self.mandate.max_open_positions,
+                    "allow_short": self.mandate.allow_short,
+                },
+            )
+
+        if operation == "portfolio":
+            portfolio = self.paper_broker.portfolio
+            return ExecutionResult(
+                True,
+                f"Paper positions: {len(portfolio.positions)}",
+                data={
+                    "positions": [
+                        {
+                            "symbol": position.symbol,
+                            "quantity": position.quantity,
+                            "average_price": position.average_price,
+                        }
+                        for position in portfolio.positions
+                    ],
+                    "realized_pnl_today": portfolio.realized_pnl_today,
+                    "realized_pnl_total": portfolio.realized_pnl_total,
+                    "orders": len(self.paper_broker.orders),
                 },
             )
 
         if operation == "paper_order":
             signal = params["signal"]
             quantity = int(params["quantity"])
-            order = self.paper_broker.place_order(
-                signal,
-                quantity,
-                self.mandate,
-                RiskSnapshot(),
-            )
+            snapshot = self.paper_broker.portfolio.snapshot({signal.symbol: signal.price})
+            order = self.paper_broker.place_order(signal, quantity, self.mandate, snapshot)
             success = order.status.value == "filled"
             return ExecutionResult(
                 success,

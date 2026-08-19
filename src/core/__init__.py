@@ -4,6 +4,7 @@ The core package contains no Git-, GitHub-, file-, model-, or provider-specific
 logic. External capabilities plug in through the generic Skill contract.
 """
 
+from .audit import AuditEntry, AuditLedger, AuditStatus, SQLiteAuditLedger
 from .contracts import (
     ExecutionResult,
     OperationSpec,
@@ -20,6 +21,9 @@ from .registry import SkillRegistry
 from .security import SecurityGate
 
 __all__ = [
+    "AuditEntry",
+    "AuditLedger",
+    "AuditStatus",
     "ContextBus",
     "ContextSnapshot",
     "Dispatcher",
@@ -31,6 +35,7 @@ __all__ = [
     "PolicyDecision",
     "PolicyOutcome",
     "RiskTier",
+    "SQLiteAuditLedger",
     "SecurityGate",
     "SkillMatch",
     "SkillMetadata",
