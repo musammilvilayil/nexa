@@ -8,7 +8,15 @@ from core import ContextBus, NexaKernel, SQLiteAuditLedger, SkillRegistry
 from skills.file_skill import FileSkill
 from skills.git_plugin import GitPlugin
 from skills.github_skill import GitHubSkill
-from skills.trading import PaperBroker, TradingMandate, TradingMode, TradingSkill
+from skills.trading import (
+    AdaptiveStrategyRouter,
+    PaperBroker,
+    StrategyPromotionStore,
+    TradingBrain,
+    TradingMandate,
+    TradingMode,
+    TradingSkill,
+)
 from skills.workspace_skill import WorkspaceSkill
 from workspace import WorkspaceManager
 
@@ -24,13 +32,12 @@ class NexaRuntime:
     workspace_manager: WorkspaceManager
     trading_skill: TradingSkill
     github_skill: GitHubSkill
+    trading_brain: TradingBrain
 
 
 def _workspace_roots() -> tuple[Path, ...]:
     raw = os.getenv("NEXA_WORKSPACE_ROOTS", "").strip()
     if not raw:
-        # Fail safe: never scan C:\ or the user's home by default. Until the owner
-        # configures additional roots, NEXA sees only its own repository.
         return (PROJECT_ROOT,)
     parts = [item.strip() for item in raw.split(os.pathsep) if item.strip()]
     if not parts:
@@ -72,15 +79,15 @@ def _bool_env(name: str, default: bool) -> bool:
 def build_trading_mandate() -> TradingMandate:
     """Build the owner trading envelope from explicit environment config.
 
-    Defaults are deliberately research-only. Switching to live modes later still
-    requires the separate LiveArmController owner-confirmed arming path.
+    Defaults are deliberately research-only. Live execution requires the
+    separate owner-confirmed arming path in the live controller.
     """
 
     mode_raw = os.getenv("NEXA_TRADING_MODE", TradingMode.RESEARCH.value).strip().lower()
     mode = TradingMode(mode_raw)
     raw_symbols = os.getenv("NEXA_TRADING_SYMBOLS", "NIFTY50")
     symbols = tuple(item.strip().upper() for item in raw_symbols.split(",") if item.strip())
-    raw_strategies = os.getenv("NEXA_TRADING_STRATEGIES", "adaptive_momentum")
+    raw_strategies = os.getenv("NEXA_TRADING_STRATEGIES", "adaptive_router_v1")
     strategies = tuple(item.strip() for item in raw_strategies.split(",") if item.strip())
 
     confidence = float(os.getenv("NEXA_MIN_SIGNAL_CONFIDENCE", "0.60"))
@@ -107,8 +114,6 @@ def build_runtime() -> NexaRuntime:
     workspace_manager = WorkspaceManager(_workspace_roots())
     repos = workspace_manager.discover()
 
-    # Select NEXA itself automatically only when it is one of the configured
-    # discovered roots; otherwise the owner must explicitly choose a repo.
     for repo in repos:
         if repo.path == PROJECT_ROOT:
             workspace_manager.switch(str(repo.path))
@@ -124,8 +129,22 @@ def build_runtime() -> NexaRuntime:
     registry.register(github_skill)
 
     mandate = build_trading_mandate()
-    trading_skill = TradingSkill(mandate, PaperBroker())
+    paper_broker = PaperBroker()
+    trading_skill = TradingSkill(mandate, paper_broker)
     registry.register(trading_skill)
+
+    promotion_path = Path(
+        os.getenv(
+            "NEXA_STRATEGY_DB",
+            str(PROJECT_ROOT / "data" / "strategy_promotion.db"),
+        )
+    ).expanduser().resolve()
+    trading_brain = TradingBrain(
+        mandate=mandate,
+        strategy=AdaptiveStrategyRouter(),
+        promotion_store=StrategyPromotionStore(promotion_path),
+        paper_broker=paper_broker,
+    )
 
     audit_path = Path(
         os.getenv("NEXA_AUDIT_DB", str(PROJECT_ROOT / "data" / "actions.db"))
@@ -139,6 +158,8 @@ def build_runtime() -> NexaRuntime:
     context_bus.set_environment_flag("gemini_available", bool(os.getenv("GEMINI_API_KEY", "").strip()))
     context_bus.set_environment_flag("ollama_url", os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"))
     context_bus.set_environment_flag("trading_mode", mandate.mode.value)
+    context_bus.set_environment_flag("trading_strategy", trading_brain.strategy.strategy_id)
+    context_bus.set_environment_flag("trading_stage", trading_brain.stage.value)
 
     return NexaRuntime(
         kernel=kernel,
@@ -147,4 +168,5 @@ def build_runtime() -> NexaRuntime:
         workspace_manager=workspace_manager,
         trading_skill=trading_skill,
         github_skill=github_skill,
+        trading_brain=trading_brain,
     )
