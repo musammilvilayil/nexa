@@ -15,7 +15,8 @@ class TradingControlSkill:
 
     Normal live orders are not routed through this text skill. It only manages
     the safety envelope: inspect state, activate/disarm safety immediately, and
-    confirmation-gated clearing/arming operations.
+    confirmation-gated clearing/arming operations. Live strategy eligibility is
+    checked both when an arm request is validated and again at execution time.
     """
 
     def __init__(
@@ -36,7 +37,7 @@ class TradingControlSkill:
         self.live_controller = live_controller
         self.metadata = SkillMetadata(
             name="trading_control",
-            version="0.1.0",
+            version="0.2.0",
             description="Owner control plane for live arming, disarming, and kill-switch state",
             operations=(
                 OperationSpec("status", "Inspect live trading control state", RiskTier.READ),
@@ -77,20 +78,8 @@ class TradingControlSkill:
                 raise ValueError("kill-switch reason must be 1-500 safe characters")
             return {"reason": reason}
         if operation == "arm_live":
-            if self.live_controller is None:
-                raise ValueError("no trusted live broker adapter is configured")
-            if self.mandate.mode != TradingMode.LIVE_AUTONOMOUS:
-                raise ValueError("trading mandate is not LIVE_AUTONOMOUS")
-            if not self.mandate.allowed_strategies:
-                raise ValueError("live mandate has no explicitly allowed strategies")
-            ineligible = tuple(
-                strategy_id
-                for strategy_id in self.mandate.allowed_strategies
-                if self.promotion_store.stage(strategy_id) != StrategyStage.LIVE_ELIGIBLE
-            )
-            if ineligible:
-                raise ValueError("live-ineligible strategies: " + ", ".join(ineligible))
-            return {"eligible": tuple(self.mandate.allowed_strategies)}
+            eligible = self._require_live_arm_preconditions()
+            return {"eligible": eligible}
         raise ValueError("unknown trading-control operation")
 
     def execute(
@@ -137,16 +126,43 @@ class TradingControlSkill:
             return ExecutionResult(True, "Trading kill switch cleared")
 
         if operation == "arm_live":
-            eligible = tuple(str(item) for item in params["eligible"])
+            try:
+                current_eligible = self._require_live_arm_preconditions()
+            except (ValueError, PermissionError) as exc:
+                return ExecutionResult(False, str(exc), error=str(exc))
+
+            validated_eligible = tuple(str(item) for item in params["eligible"])
+            if current_eligible != validated_eligible:
+                return ExecutionResult(
+                    False,
+                    "live strategy eligibility changed after validation; submit the arm request again",
+                    error="stale live-arm precondition",
+                )
             self.live_arm.arm(
                 self.mandate,
                 owner_confirmed=True,
-                live_eligible_strategies=eligible,
+                live_eligible_strategies=current_eligible,
             )
             self._sync_flags()
             return ExecutionResult(True, "Live autonomous trading armed for the exact owner mandate")
 
         return ExecutionResult(False, "unknown trading-control operation", error="unknown operation")
+
+    def _require_live_arm_preconditions(self) -> tuple[str, ...]:
+        if self.live_controller is None:
+            raise ValueError("no trusted live broker adapter is configured")
+        if self.mandate.mode != TradingMode.LIVE_AUTONOMOUS:
+            raise ValueError("trading mandate is not LIVE_AUTONOMOUS")
+        if not self.mandate.allowed_strategies:
+            raise ValueError("live mandate has no explicitly allowed strategies")
+        ineligible = tuple(
+            strategy_id
+            for strategy_id in self.mandate.allowed_strategies
+            if self.promotion_store.stage(strategy_id) != StrategyStage.LIVE_ELIGIBLE
+        )
+        if ineligible:
+            raise PermissionError("live-ineligible strategies: " + ", ".join(ineligible))
+        return tuple(self.mandate.allowed_strategies)
 
     def _sync_flags(self) -> None:
         self.context_bus.set_environment_flag("live_session_armed", self.live_arm.is_armed_for(self.mandate))
