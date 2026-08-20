@@ -66,7 +66,6 @@ class TradingControlTests(unittest.TestCase):
             promotion_store=store,
             live_arm=arm,
             kill_switch=kill,
-            context_bus=bus,
             live_controller=controller,
         )
         registry = SkillRegistry()
