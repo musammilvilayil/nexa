@@ -71,11 +71,12 @@ class TradingControlTests(unittest.TestCase):
         )
         registry = SkillRegistry()
         registry.register(skill)
-        return mandate, arm, kill, NexaKernel(registry=registry, context_bus=bus)
+        kernel = NexaKernel(registry=registry, context_bus=bus)
+        return mandate, arm, kill, store, kernel
 
     def test_live_arm_is_confirmation_gated(self):
         with tempfile.TemporaryDirectory() as temp:
-            mandate, arm, _, kernel = self._runtime_parts(Path(temp))
+            mandate, arm, _, _, kernel = self._runtime_parts(Path(temp))
             pending = kernel.process("/live arm")
             self.assertEqual(pending.status, "confirmation_required")
             self.assertFalse(arm.is_armed_for(mandate))
@@ -84,9 +85,22 @@ class TradingControlTests(unittest.TestCase):
             self.assertEqual(result.status, "success")
             self.assertTrue(arm.is_armed_for(mandate))
 
+    def test_live_arm_fails_if_strategy_loses_eligibility_while_pending(self):
+        with tempfile.TemporaryDirectory() as temp:
+            mandate, arm, _, store, kernel = self._runtime_parts(Path(temp))
+            pending = kernel.process("/live arm")
+            self.assertEqual(pending.status, "confirmation_required")
+
+            store.disable("adaptive_router_v1", "safety regression")
+            result = kernel.confirm(pending.pending_action.action_id)
+
+            self.assertEqual(result.status, "failure")
+            self.assertIn("live-ineligible", result.message)
+            self.assertFalse(arm.is_armed_for(mandate))
+
     def test_kill_activation_is_immediate_but_clear_is_confirmation_gated(self):
         with tempfile.TemporaryDirectory() as temp:
-            _, _, kill, kernel = self._runtime_parts(Path(temp))
+            _, _, kill, _, kernel = self._runtime_parts(Path(temp))
             activated = kernel.process("/live kill stale market data")
             self.assertEqual(activated.status, "success")
             self.assertTrue(kill.active)
@@ -101,7 +115,7 @@ class TradingControlTests(unittest.TestCase):
 
     def test_disarm_is_immediate_risk_reduction(self):
         with tempfile.TemporaryDirectory() as temp:
-            mandate, arm, _, kernel = self._runtime_parts(Path(temp))
+            mandate, arm, _, _, kernel = self._runtime_parts(Path(temp))
             pending = kernel.process("/live arm")
             kernel.confirm(pending.pending_action.action_id)
             self.assertTrue(arm.is_armed_for(mandate))
