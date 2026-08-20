@@ -8,6 +8,7 @@ import signal
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
+from threading import Event
 from typing import Any
 
 from control_plane import RuntimeControlPlane, health_payload, kernel_response_payload
@@ -140,17 +141,24 @@ def main() -> int:
     runtime = build_runtime()
     control = RuntimeControlPlane(runtime)
     server = ThreadingHTTPServer((args.host, args.port), build_handler(control, token=token))
+    server.daemon_threads = True
+    server.timeout = 0.5
+    stop = Event()
 
     def request_stop(*_args: object) -> None:
+        # Do not call BaseServer.shutdown() from the signal handler because the
+        # handler runs on the same thread as the server loop. A stop flag avoids
+        # that documented deadlock while keeping shutdown bounded by server.timeout.
         control.shutdown()
-        server.shutdown()
+        stop.set()
 
     signal.signal(signal.SIGINT, request_stop)
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, request_stop)
 
     try:
-        server.serve_forever(poll_interval=0.5)
+        while not stop.is_set():
+            server.handle_request()
     finally:
         control.shutdown()
         server.server_close()
