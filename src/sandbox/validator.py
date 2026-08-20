@@ -20,24 +20,64 @@ class StaticValidationReport:
 class StaticValidator(ast.NodeVisitor):
     """Conservative AST gate for teacher-generated plugin code.
 
-    Generated skills must receive capabilities through reviewed dependency
-    injection. They cannot import process/network bridges or raw escape hatches.
+    Generated skills may use the narrow public Skill contract from ``core`` and
+    pure computation helpers. They must receive host capabilities through
+    reviewed dependency injection. Direct process, network, filesystem, database,
+    project-internal, dynamic-import, or kernel-control imports are rejected.
+
+    This gate is intentionally defense-in-depth; SandboxRunner is still process
+    isolation rather than a hardened VM, so passing this validator never grants a
+    candidate automatic runtime promotion.
     """
 
     FORBIDDEN_MODULES = {
+        # Host/process/network/filesystem/database escape hatches.
+        "builtins",
         "bridges",
         "ctypes",
+        "dbm",
         "ftplib",
+        "glob",
         "http",
+        "importlib",
+        "io",
+        "marshal",
+        "mmap",
         "multiprocessing",
         "os",
+        "pathlib",
+        "pickle",
         "requests",
+        "shelve",
         "shutil",
         "smtplib",
         "socket",
+        "sqlite3",
         "subprocess",
+        "sys",
+        "tempfile",
         "urllib",
+        "webbrowser",
         "winreg",
+        # NEXA internals that generated plugins must not reach directly.
+        "git_router",
+        "git_skill",
+        "language",
+        "memory",
+        "nexa",
+        "runtime",
+        "sandbox",
+        "skills",
+        "teacher",
+        "training",
+        "workspace",
+    }
+    ALLOWED_CORE_SYMBOLS = {
+        "ExecutionResult",
+        "OperationSpec",
+        "RiskTier",
+        "SkillMatch",
+        "SkillMetadata",
     }
     FORBIDDEN_CALL_NAMES = {
         "__import__",
@@ -52,6 +92,11 @@ class StaticValidator(ast.NodeVisitor):
         "rmdir",
         "system",
         "unlink",
+    }
+    FORBIDDEN_NAMES = {
+        "__builtins__",
+        "__loader__",
+        "__spec__",
     }
 
     def __init__(self) -> None:
@@ -72,13 +117,29 @@ class StaticValidator(ast.NodeVisitor):
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
             root = alias.name.split(".", 1)[0]
-            if root in self.FORBIDDEN_MODULES:
+            if root == "core":
+                self._add(
+                    node,
+                    "unsafe_core_import",
+                    "bare 'import core' is blocked; import only approved Skill contract symbols",
+                )
+            elif root in self.FORBIDDEN_MODULES:
                 self._add(node, "forbidden_import", f"direct import blocked: {root}")
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         root = (node.module or "").split(".", 1)[0]
-        if root in self.FORBIDDEN_MODULES:
+        if root == "core":
+            if node.level != 0 or node.module != "core":
+                self._add(node, "unsafe_core_import", "only 'from core import ...' is allowed")
+            for alias in node.names:
+                if alias.name == "*" or alias.name not in self.ALLOWED_CORE_SYMBOLS:
+                    self._add(
+                        node,
+                        "unsafe_core_symbol",
+                        f"generated skill cannot import core symbol: {alias.name}",
+                    )
+        elif root in self.FORBIDDEN_MODULES:
             self._add(node, "forbidden_import", f"direct import blocked: {root}")
         self.generic_visit(node)
 
@@ -97,6 +158,11 @@ class StaticValidator(ast.NodeVisitor):
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if node.attr.startswith("__"):
             self._add(node, "dunder_access", "dunder attribute access is forbidden in generated skills")
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if node.id in self.FORBIDDEN_NAMES:
+            self._add(node, "forbidden_name", f"name access blocked: {node.id}")
         self.generic_visit(node)
 
     def _add(self, node: ast.AST, code: str, message: str) -> None:
