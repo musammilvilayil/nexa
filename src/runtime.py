@@ -11,6 +11,8 @@ from skills.github_skill import GitHubSkill
 from skills.trading import (
     AdaptiveStrategyRouter,
     BrokerAdapter,
+    BrokerFactoryRegistry,
+    BrokerSelection,
     LiveArmController,
     LiveExecutionController,
     PaperBroker,
@@ -23,6 +25,7 @@ from skills.trading import (
     TradingMandate,
     TradingMode,
     TradingSkill,
+    build_selected_trusted_broker,
 )
 from skills.workspace_skill import WorkspaceSkill
 from workspace import WorkspaceManager
@@ -244,3 +247,20 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
         kill_switch=kill_switch,
         live_controller=live_controller,
     )
+
+
+def build_runtime_from_trusted_brokers(
+    registry: BrokerFactoryRegistry,
+    *,
+    selection: BrokerSelection | None = None,
+) -> NexaRuntime:
+    """Explicit trusted application path for enabling a reviewed broker adapter.
+
+    Unlike ``build_runtime()``, this function may consult the non-secret broker
+    selector environment when ``selection`` is omitted. It still cannot import or
+    instantiate an arbitrary adapter: the provider must already exist in the
+    caller-supplied ``BrokerFactoryRegistry``. Live execution remains disarmed.
+    """
+
+    broker = build_selected_trusted_broker(registry, selection=selection)
+    return build_runtime(live_broker=broker)
