@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Iterable, Mapping
 
 from .models import RiskSnapshot, TradeSide
 
@@ -34,12 +34,35 @@ class PaperPortfolio:
 
     Positive quantity is long, negative quantity is short. Fees are deducted from
     realized PnL immediately so performance metrics never ignore execution cost.
+
+    The optional constructor state exists for trusted persistence adapters. It is
+    validated with the same invariants as live mutations so restart recovery does
+    not silently admit malformed positions or PnL values.
     """
 
-    def __init__(self) -> None:
-        self._positions: dict[str, Position] = {}
-        self._realized_pnl_today = 0.0
-        self._realized_pnl_total = 0.0
+    def __init__(
+        self,
+        *,
+        positions: Iterable[Position] = (),
+        realized_pnl_today: float = 0.0,
+        realized_pnl_total: float = 0.0,
+    ) -> None:
+        if not math.isfinite(realized_pnl_today):
+            raise ValueError("realized_pnl_today must be finite")
+        if not math.isfinite(realized_pnl_total):
+            raise ValueError("realized_pnl_total must be finite")
+
+        restored: dict[str, Position] = {}
+        for position in positions:
+            if not isinstance(position, Position):
+                raise TypeError("positions must contain Position values")
+            if position.symbol in restored:
+                raise ValueError(f"duplicate position for {position.symbol}")
+            restored[position.symbol] = position
+
+        self._positions = restored
+        self._realized_pnl_today = float(realized_pnl_today)
+        self._realized_pnl_total = float(realized_pnl_total)
 
     @property
     def positions(self) -> tuple[Position, ...]:
