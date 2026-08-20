@@ -10,9 +10,13 @@ from skills.git_plugin import GitPlugin
 from skills.github_skill import GitHubSkill
 from skills.trading import (
     AdaptiveStrategyRouter,
+    BrokerAdapter,
+    LiveArmController,
+    LiveExecutionController,
     PaperBroker,
     StrategyPromotionStore,
     TradingBrain,
+    TradingKillSwitch,
     TradingMandate,
     TradingMode,
     TradingSkill,
@@ -33,11 +37,17 @@ class NexaRuntime:
     trading_skill: TradingSkill
     github_skill: GitHubSkill
     trading_brain: TradingBrain
+    promotion_store: StrategyPromotionStore
+    live_arm: LiveArmController
+    kill_switch: TradingKillSwitch
+    live_controller: LiveExecutionController | None
 
 
 def _workspace_roots() -> tuple[Path, ...]:
     raw = os.getenv("NEXA_WORKSPACE_ROOTS", "").strip()
     if not raw:
+        # Never crawl the drive/home implicitly. The repository itself is the
+        # only default workspace until the owner configures explicit roots.
         return (PROJECT_ROOT,)
     parts = [item.strip() for item in raw.split(os.pathsep) if item.strip()]
     if not parts:
@@ -79,8 +89,8 @@ def _bool_env(name: str, default: bool) -> bool:
 def build_trading_mandate() -> TradingMandate:
     """Build the owner trading envelope from explicit environment config.
 
-    Defaults are deliberately research-only. Live execution requires the
-    separate owner-confirmed arming path in the live controller.
+    Defaults are deliberately research-only. A live mode in configuration does
+    not itself arm execution; LiveArmController remains a separate owner action.
     """
 
     mode_raw = os.getenv("NEXA_TRADING_MODE", TradingMode.RESEARCH.value).strip().lower()
@@ -109,7 +119,16 @@ def build_trading_mandate() -> TradingMandate:
     )
 
 
-def build_runtime() -> NexaRuntime:
+def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
+    """Construct the production local runtime.
+
+    No live broker is created from environment strings or model output. A broker
+    adapter must be explicitly supplied by trusted owner-controlled application
+    code. Even then, ordinary live entries remain blocked until the mandate is
+    LIVE_AUTONOMOUS, the strategy is LIVE_ELIGIBLE, and LiveArmController is
+    owner-confirmed for the exact mandate fingerprint.
+    """
+
     context_bus = ContextBus()
     workspace_manager = WorkspaceManager(_workspace_roots())
     repos = workspace_manager.discover()
@@ -139,12 +158,25 @@ def build_runtime() -> NexaRuntime:
             str(PROJECT_ROOT / "data" / "strategy_promotion.db"),
         )
     ).expanduser().resolve()
+    promotion_store = StrategyPromotionStore(promotion_path)
     trading_brain = TradingBrain(
         mandate=mandate,
         strategy=AdaptiveStrategyRouter(),
-        promotion_store=StrategyPromotionStore(promotion_path),
+        promotion_store=promotion_store,
         paper_broker=paper_broker,
     )
+
+    live_arm = LiveArmController()
+    kill_switch = TradingKillSwitch()
+    live_controller = None
+    if live_broker is not None:
+        live_controller = LiveExecutionController(
+            mandate=mandate,
+            broker=live_broker,
+            promotion_store=promotion_store,
+            arm=live_arm,
+            kill_switch=kill_switch,
+        )
 
     audit_path = Path(
         os.getenv("NEXA_AUDIT_DB", str(PROJECT_ROOT / "data" / "actions.db"))
@@ -154,12 +186,17 @@ def build_runtime() -> NexaRuntime:
         registry=registry,
         context_bus=context_bus,
         audit_ledger=audit,
+        pending_ttl_seconds=_float_env("NEXA_PENDING_TTL_SECONDS", 300.0),
     )
+
     context_bus.set_environment_flag("gemini_available", bool(os.getenv("GEMINI_API_KEY", "").strip()))
     context_bus.set_environment_flag("ollama_url", os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"))
     context_bus.set_environment_flag("trading_mode", mandate.mode.value)
     context_bus.set_environment_flag("trading_strategy", trading_brain.strategy.strategy_id)
     context_bus.set_environment_flag("trading_stage", trading_brain.stage.value)
+    context_bus.set_environment_flag("live_broker_configured", live_broker is not None)
+    context_bus.set_environment_flag("live_session_armed", live_arm.armed)
+    context_bus.set_environment_flag("kill_switch_active", kill_switch.active)
 
     return NexaRuntime(
         kernel=kernel,
@@ -169,4 +206,8 @@ def build_runtime() -> NexaRuntime:
         trading_skill=trading_skill,
         github_skill=github_skill,
         trading_brain=trading_brain,
+        promotion_store=promotion_store,
+        live_arm=live_arm,
+        kill_switch=kill_switch,
+        live_controller=live_controller,
     )
