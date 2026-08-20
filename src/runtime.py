@@ -14,6 +14,7 @@ from skills.trading import (
     LiveArmController,
     LiveExecutionController,
     PaperBroker,
+    PaperStateStore,
     StrategyPromotionStore,
     TradingBrain,
     TradingControlSkill,
@@ -40,6 +41,7 @@ class NexaRuntime:
     github_skill: GitHubSkill
     trading_brain: TradingBrain
     promotion_store: StrategyPromotionStore
+    paper_state_store: PaperStateStore
     live_arm: LiveArmController
     kill_switch: TradingKillSwitch
     live_controller: LiveExecutionController | None
@@ -153,7 +155,14 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
     registry.register(github_skill)
 
     mandate = build_trading_mandate()
-    paper_broker = PaperBroker()
+    paper_path = Path(
+        os.getenv(
+            "NEXA_PAPER_DB",
+            str(PROJECT_ROOT / "data" / "paper_trading.db"),
+        )
+    ).expanduser().resolve()
+    paper_state_store = PaperStateStore(paper_path)
+    paper_broker = PaperBroker(state_store=paper_state_store)
     trading_skill = TradingSkill(mandate, paper_broker)
     registry.register(trading_skill)
 
@@ -209,6 +218,7 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
     context_bus.set_environment_flag("trading_mode", mandate.mode.value)
     context_bus.set_environment_flag("trading_strategy", trading_brain.strategy.strategy_id)
     context_bus.set_environment_flag("live_broker_configured", live_broker is not None)
+    context_bus.set_environment_flag("paper_state_persistent", True)
 
     return NexaRuntime(
         kernel=kernel,
@@ -220,6 +230,7 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
         github_skill=github_skill,
         trading_brain=trading_brain,
         promotion_store=promotion_store,
+        paper_state_store=paper_state_store,
         live_arm=live_arm,
         kill_switch=kill_switch,
         live_controller=live_controller,
