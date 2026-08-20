@@ -16,15 +16,16 @@ class RiskEngine:
         if quantity <= 0:
             return RiskDecision(False, "quantity must be positive")
 
-        if mandate.mode == TradingMode.RESEARCH:
-            return RiskDecision(False, "research mode cannot place orders")
-
         current_quantity = snapshot.position_quantity(signal.symbol)
         reducing = self._is_pure_risk_reducing(signal.side, quantity, current_quantity)
         if reducing:
-            # Exits remain possible after a loss ceiling, strategy deactivation,
-            # or symbol-universe change. A safety gate must not trap exposure.
+            # Pure exits are evaluated before mode/symbol/strategy/loss gates so
+            # disabling a strategy, changing mode, shrinking the universe, or
+            # hitting a loss ceiling cannot trap existing exposure.
             return RiskDecision(True, "approved risk-reducing exit", quantity)
+
+        if mandate.mode == TradingMode.RESEARCH:
+            return RiskDecision(False, "research mode cannot place external/paper orders")
 
         if signal.symbol not in mandate.allowed_symbols:
             return RiskDecision(False, f"symbol not allowed: {signal.symbol}")
