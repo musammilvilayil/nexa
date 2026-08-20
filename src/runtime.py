@@ -16,6 +16,7 @@ from skills.trading import (
     PaperBroker,
     StrategyPromotionStore,
     TradingBrain,
+    TradingControlSkill,
     TradingKillSwitch,
     TradingMandate,
     TradingMode,
@@ -35,6 +36,7 @@ class NexaRuntime:
     context_bus: ContextBus
     workspace_manager: WorkspaceManager
     trading_skill: TradingSkill
+    trading_control_skill: TradingControlSkill
     github_skill: GitHubSkill
     trading_brain: TradingBrain
     promotion_store: StrategyPromotionStore
@@ -178,6 +180,16 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
             kill_switch=kill_switch,
         )
 
+    trading_control_skill = TradingControlSkill(
+        mandate=mandate,
+        promotion_store=promotion_store,
+        live_arm=live_arm,
+        kill_switch=kill_switch,
+        context_bus=context_bus,
+        live_controller=live_controller,
+    )
+    registry.register(trading_control_skill)
+
     audit_path = Path(
         os.getenv("NEXA_AUDIT_DB", str(PROJECT_ROOT / "data" / "actions.db"))
     ).expanduser().resolve()
@@ -204,6 +216,7 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
         context_bus=context_bus,
         workspace_manager=workspace_manager,
         trading_skill=trading_skill,
+        trading_control_skill=trading_control_skill,
         github_skill=github_skill,
         trading_brain=trading_brain,
         promotion_store=promotion_store,
