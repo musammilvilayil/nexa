@@ -29,6 +29,7 @@ from .models import (
     TradingMode,
 )
 from .paper import PaperBroker
+from .paper_evidence import PaperEvidenceReport, PaperEvidenceStore
 from .paper_service import PaperRuntimeService, PaperServiceCycle, PaperSymbolCycle
 from .paper_state import PaperRuntimeState, PaperStateStore
 from .portfolio import FillEffect, PaperPortfolio, Position
@@ -93,6 +94,8 @@ __all__ = [
     "PaperBroker",
     "PaperCycleResult",
     "PaperEvidence",
+    "PaperEvidenceReport",
+    "PaperEvidenceStore",
     "PaperOrder",
     "PaperPortfolio",
     "PaperRuntimeService",
