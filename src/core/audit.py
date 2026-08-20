@@ -8,6 +8,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, Protocol
 
+from sqlite_utils import connect_sqlite
+
 
 class AuditStatus(str, Enum):
     PENDING = "pending"
@@ -84,9 +86,7 @@ class SQLiteAuditLedger:
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path)
-        connection.row_factory = sqlite3.Row
-        return connection
+        return connect_sqlite(self.db_path)
 
     def _initialize(self) -> None:
         with self._connect() as connection:
