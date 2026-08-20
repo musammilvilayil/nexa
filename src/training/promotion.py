@@ -14,7 +14,12 @@ class PromotionDecision:
 
 
 class TrainingPromotionGate:
-    """Decides whether a validated candidate may be promoted automatically."""
+    """Decides whether a validated candidate may be promoted automatically.
+
+    Only read-only candidates can be staged automatically. Local mutation,
+    remote/destructive actions, and live-trading capability always require a
+    separate owner/policy approval path.
+    """
 
     def __init__(self, policy: TrainingPolicy | None = None) -> None:
         self.policy = policy or TrainingPolicy()
@@ -25,16 +30,25 @@ class TrainingPromotionGate:
                 return PromotionDecision(True, True, "read-only candidate may auto-promote")
             return PromotionDecision(False, False, "read-only auto-promotion disabled")
 
-        if candidate.risk == CandidateRisk.TRADING_RESEARCH if hasattr(CandidateRisk, "TRADING_RESEARCH") else False:
-            return PromotionDecision(False, False, "unsupported risk classification")
-
         if candidate.risk == CandidateRisk.LIVE_TRADING:
-            return PromotionDecision(False, False, "live trading requires explicit owner authorization")
+            return PromotionDecision(
+                False,
+                False,
+                "live-trading capability requires explicit owner authorization",
+            )
 
         if candidate.risk in {CandidateRisk.REMOTE, CandidateRisk.DESTRUCTIVE}:
-            return PromotionDecision(False, False, "remote/destructive capability requires owner approval")
+            return PromotionDecision(
+                False,
+                False,
+                "remote/destructive capability requires explicit owner approval",
+            )
 
-        return PromotionDecision(False, False, "local mutation candidate requires approval")
+        return PromotionDecision(
+            False,
+            False,
+            "local-mutation capability requires explicit owner approval",
+        )
 
 
 class CandidateStore:
