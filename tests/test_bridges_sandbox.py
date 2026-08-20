@@ -48,6 +48,29 @@ class BridgeAndSandboxTests(unittest.TestCase):
         self.assertIn("forbidden_import", codes)
         self.assertIn("forbidden_call", codes)
 
+    def test_static_validator_blocks_direct_filesystem_database_and_nexa_internals(self):
+        report = StaticValidator().validate(
+            "from pathlib import Path\n"
+            "import sqlite3\n"
+            "from skills.trading.promotion import StrategyPromotionStore\n"
+        )
+        self.assertFalse(report.safe)
+        blocked = [finding.message for finding in report.findings if finding.code == "forbidden_import"]
+        self.assertTrue(any("pathlib" in message for message in blocked))
+        self.assertTrue(any("sqlite3" in message for message in blocked))
+        self.assertTrue(any("skills" in message for message in blocked))
+
+    def test_static_validator_allows_only_narrow_core_skill_contract(self):
+        validator = StaticValidator()
+        safe = validator.validate(
+            "from core import ExecutionResult, OperationSpec, RiskTier, SkillMatch, SkillMetadata\n"
+        )
+        unsafe = validator.validate("from core import NexaKernel, SQLiteAuditLedger\n")
+        bare = validator.validate("import core\n")
+        self.assertTrue(safe.safe)
+        self.assertFalse(unsafe.safe)
+        self.assertFalse(bare.safe)
+
     def test_sandbox_runs_safe_unittest_candidate(self):
         files = {
             "skill.py": "def add(a, b):\n    return a + b\n",
