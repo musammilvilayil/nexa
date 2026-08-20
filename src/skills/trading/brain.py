@@ -60,6 +60,10 @@ class TradingBrain:
     def stage(self) -> StrategyStage:
         return self.promotion_store.stage(self.strategy.strategy_id) or StrategyStage.RESEARCH
 
+    @property
+    def paper_runtime_armed(self) -> bool:
+        return self._paper_trader is not None
+
     def research(
         self,
         series: MarketSeries,
@@ -101,6 +105,11 @@ class TradingBrain:
             broker=self.paper_broker,
             max_market_age_seconds=self.max_market_age_seconds,
         )
+
+    def disarm_paper_runtime(self) -> None:
+        """Stop accepting autonomous paper market updates without changing evidence."""
+
+        self._paper_trader = None
 
     def on_market_update(self, series: MarketSeries) -> PaperCycleResult:
         if self._paper_trader is None:
