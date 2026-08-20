@@ -19,6 +19,9 @@ class PerformanceMetrics:
     max_drawdown: float
     max_drawdown_pct: float
     sharpe_like: float
+    gross_profit: float = 0.0
+    gross_loss: float = 0.0
+    sortino_like: float = 0.0
 
 
 def calculate_metrics(report: BacktestReport) -> PerformanceMetrics:
@@ -39,6 +42,7 @@ def calculate_metrics(report: BacktestReport) -> PerformanceMetrics:
 
     max_drawdown, max_drawdown_pct = _drawdown(report)
     sharpe_like = _trade_sharpe(pnls)
+    sortino_like = _trade_sortino(pnls)
     return_pct = ((report.final_equity / report.initial_equity) - 1.0) * 100.0
 
     return PerformanceMetrics(
@@ -53,6 +57,9 @@ def calculate_metrics(report: BacktestReport) -> PerformanceMetrics:
         max_drawdown=max_drawdown,
         max_drawdown_pct=max_drawdown_pct,
         sharpe_like=sharpe_like,
+        gross_profit=gross_profit,
+        gross_loss=gross_loss,
+        sortino_like=sortino_like,
     )
 
 
@@ -77,3 +84,14 @@ def _trade_sharpe(pnls: list[float]) -> float:
     if variance <= 0:
         return 0.0
     return mean / math.sqrt(variance)
+
+
+def _trade_sortino(pnls: list[float]) -> float:
+    if len(pnls) < 2:
+        return 0.0
+    mean = sum(pnls) / len(pnls)
+    downside = [min(0.0, value) for value in pnls]
+    downside_variance = sum(value * value for value in downside) / len(pnls)
+    if downside_variance <= 0:
+        return math.inf if mean > 0 else 0.0
+    return mean / math.sqrt(downside_variance)
