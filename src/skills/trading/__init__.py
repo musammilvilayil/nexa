@@ -2,6 +2,7 @@
 
 from .backtest import BacktestEngine, BacktestReport, BacktestTrade, EquityPoint
 from .brain import TradingBrain, TradingBrainResearchResult
+from .control_skill import TradingControlSkill
 from .data_provider import CSVMarketDataProvider, MarketDataProvider
 from .indicators import atr, ema, highest, lowest, sma, true_range
 from .journal import TradingJournal
@@ -113,6 +114,7 @@ __all__ = [
     "TradeSignal",
     "TradingBrain",
     "TradingBrainResearchResult",
+    "TradingControlSkill",
     "TradingJournal",
     "TradingKillSwitch",
     "TradingMandate",
