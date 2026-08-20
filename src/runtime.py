@@ -48,8 +48,6 @@ class NexaRuntime:
 def _workspace_roots() -> tuple[Path, ...]:
     raw = os.getenv("NEXA_WORKSPACE_ROOTS", "").strip()
     if not raw:
-        # Never crawl the drive/home implicitly. The repository itself is the
-        # only default workspace until the owner configures explicit roots.
         return (PROJECT_ROOT,)
     parts = [item.strip() for item in raw.split(os.pathsep) if item.strip()]
     if not parts:
@@ -178,6 +176,7 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
             promotion_store=promotion_store,
             arm=live_arm,
             kill_switch=kill_switch,
+            max_signal_age_seconds=_float_env("NEXA_MAX_SIGNAL_AGE_SECONDS", 60.0),
         )
 
     trading_control_skill = TradingControlSkill(
