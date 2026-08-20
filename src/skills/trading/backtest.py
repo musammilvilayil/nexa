@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 
 from .market import MarketSeries
-from .models import OrderStatus, TradeSide, TradeSignal, TradingMandate
+from .models import OrderStatus, TradeSide, TradeSignal, TradingMandate, TradingMode
 from .paper import PaperBroker
 from .sizing import FixedRiskSizer
 from .strategy import Strategy
@@ -60,9 +60,10 @@ class BacktestEngine:
     """Single-symbol event backtester with next-bar execution.
 
     A signal may only be generated after a bar closes and is executed at the next
-    bar's open. This prevents the most common same-bar look-ahead mistake.
-    If stop and target are both touched in one bar, stop is chosen first as the
-    conservative path because intrabar order is unknown from OHLC data alone.
+    bar's open. This prevents the most common same-bar look-ahead mistake. The
+    owner mandate's risk limits remain active, but RESEARCH mode is converted to
+    an internal PAPER_AUTONOMOUS simulation mandate so research can actually be
+    evaluated without enabling any external execution path.
     """
 
     def __init__(
@@ -89,6 +90,11 @@ class BacktestEngine:
         if len(series.candles) < 2:
             raise ValueError("backtest requires at least two bars")
 
+        simulation_mandate = (
+            replace(mandate, mode=TradingMode.PAPER_AUTONOMOUS)
+            if mandate.mode == TradingMode.RESEARCH
+            else mandate
+        )
         broker = PaperBroker(fee_bps=self.fee_bps, slippage_bps=self.slippage_bps)
         pending_signal: TradeSignal | None = None
         open_trade: _OpenTrade | None = None
@@ -104,7 +110,7 @@ class BacktestEngine:
                 if exit_price is not None:
                     trade, open_trade, rejected = self._close_trade(
                         broker,
-                        mandate,
+                        simulation_mandate,
                         series.symbol,
                         open_trade,
                         bar.timestamp,
@@ -118,9 +124,9 @@ class BacktestEngine:
             if index > 0 and open_trade is None and pending_signal is not None:
                 execution_signal = self._reprice_for_next_open(pending_signal, bar.open)
                 snapshot = broker.portfolio.snapshot({series.symbol: bar.open})
-                quantity = self.sizer.size(execution_signal, mandate, snapshot)
+                quantity = self.sizer.size(execution_signal, simulation_mandate, snapshot)
                 if quantity > 0:
-                    order = broker.place_order(execution_signal, quantity, mandate, snapshot)
+                    order = broker.place_order(execution_signal, quantity, simulation_mandate, snapshot)
                     if order.status == OrderStatus.FILLED and order.fill_price is not None:
                         open_trade = _OpenTrade(
                             side=execution_signal.side,
@@ -152,7 +158,7 @@ class BacktestEngine:
             final_bar = series.last
             trade, open_trade, rejected = self._close_trade(
                 broker,
-                mandate,
+                simulation_mandate,
                 series.symbol,
                 open_trade,
                 final_bar.timestamp,
@@ -198,6 +204,7 @@ class BacktestEngine:
             strategy_id=signal.strategy_id,
             stop_loss=stop_loss,
             take_profit=take_profit,
+            generated_at_utc=signal.generated_at_utc,
         )
 
     @staticmethod
