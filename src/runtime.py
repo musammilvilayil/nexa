@@ -1,0 +1,138 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+from core import ContextBus, NexaKernel, SQLiteAuditLedger, SkillRegistry
+from skills.file_skill import FileSkill
+from skills.git_plugin import GitPlugin
+from skills.trading import PaperBroker, TradingMandate, TradingMode, TradingSkill
+from skills.workspace_skill import WorkspaceSkill
+from workspace import WorkspaceManager
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+@dataclass(frozen=True)
+class NexaRuntime:
+    kernel: NexaKernel
+    registry: SkillRegistry
+    context_bus: ContextBus
+    workspace_manager: WorkspaceManager
+    trading_skill: TradingSkill
+
+
+def _workspace_roots() -> tuple[Path, ...]:
+    raw = os.getenv("NEXA_WORKSPACE_ROOTS", "").strip()
+    if not raw:
+        # Fail safe: never scan C:\ or the user's home by default. Until the owner
+        # configures additional roots, NEXA sees only its own repository.
+        return (PROJECT_ROOT,)
+    parts = [item.strip() for item in raw.split(os.pathsep) if item.strip()]
+    if not parts:
+        return (PROJECT_ROOT,)
+    return tuple(Path(item).expanduser().resolve() for item in parts)
+
+
+def _float_env(name: str, default: float) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    value = float(raw)
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _int_env(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    value = int(raw)
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be boolean")
+
+
+def build_trading_mandate() -> TradingMandate:
+    """Build the owner trading envelope from explicit environment config.
+
+    Defaults are deliberately research-only. Switching to live modes later still
+    requires the separate LiveArmController owner-confirmed arming path.
+    """
+
+    mode_raw = os.getenv("NEXA_TRADING_MODE", TradingMode.RESEARCH.value).strip().lower()
+    mode = TradingMode(mode_raw)
+    raw_symbols = os.getenv("NEXA_TRADING_SYMBOLS", "NIFTY50")
+    symbols = tuple(item.strip().upper() for item in raw_symbols.split(",") if item.strip())
+    raw_strategies = os.getenv("NEXA_TRADING_STRATEGIES", "adaptive_momentum")
+    strategies = tuple(item.strip() for item in raw_strategies.split(",") if item.strip())
+
+    return TradingMandate(
+        mode=mode,
+        allowed_symbols=symbols,
+        allowed_strategies=strategies,
+        max_notional_per_trade=_float_env("NEXA_MAX_NOTIONAL_PER_TRADE", 10_000.0),
+        max_total_exposure=_float_env("NEXA_MAX_TOTAL_EXPOSURE", 25_000.0),
+        max_risk_per_trade=_float_env("NEXA_MAX_RISK_PER_TRADE", 250.0),
+        max_daily_loss=_float_env("NEXA_MAX_DAILY_LOSS", 500.0),
+        max_open_positions=_int_env("NEXA_MAX_OPEN_POSITIONS", 3),
+        min_signal_confidence=float(os.getenv("NEXA_MIN_SIGNAL_CONFIDENCE", "0.60")),
+        allow_short=_bool_env("NEXA_ALLOW_SHORT", False),
+        require_stop_loss=_bool_env("NEXA_REQUIRE_STOP_LOSS", True),
+    )
+
+
+def build_runtime() -> NexaRuntime:
+    context_bus = ContextBus()
+    workspace_manager = WorkspaceManager(_workspace_roots())
+    repos = workspace_manager.discover()
+
+    # Select NEXA itself automatically only when it is one of the configured
+    # discovered roots; otherwise the owner must explicitly choose a repo.
+    for repo in repos:
+        if repo.path == PROJECT_ROOT:
+            workspace_manager.switch(str(repo.path))
+            context_bus.set_active_workspace(repo.path)
+            break
+
+    registry = SkillRegistry()
+    registry.register(WorkspaceSkill(workspace_manager, context_bus))
+    registry.register(FileSkill())
+    registry.register(GitPlugin())
+
+    mandate = build_trading_mandate()
+    trading_skill = TradingSkill(mandate, PaperBroker())
+    registry.register(trading_skill)
+
+    audit_path = Path(os.getenv("NEXA_AUDIT_DB", str(PROJECT_ROOT / "data" / "actions.db"))).expanduser().resolve()
+    audit = SQLiteAuditLedger(audit_path)
+    kernel = NexaKernel(
+        registry=registry,
+        context_bus=context_bus,
+        audit_ledger=audit,
+    )
+    context_bus.set_environment_flag("gemini_available", bool(os.getenv("GEMINI_API_KEY", "").strip()))
+    context_bus.set_environment_flag("ollama_url", os.getenv("OLLAMA_URL", "http://localhost:11434"))
+    context_bus.set_environment_flag("trading_mode", mandate.mode.value)
+
+    return NexaRuntime(
+        kernel=kernel,
+        registry=registry,
+        context_bus=context_bus,
+        workspace_manager=workspace_manager,
+        trading_skill=trading_skill,
+    )
