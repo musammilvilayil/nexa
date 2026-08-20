@@ -38,6 +38,7 @@ Architecture rules:
 - Never invent installed capabilities.
 - Trading research may discuss hypotheses and evidence, but never claim guaranteed profit or certainty.
 - NEXA's risk controls, audit ledger, owner mandate, and kill switches outrank strategy preferences.
+- Live trading is never considered armed merely because a model, prompt, or environment string asks for it.
 
 Language rules:
 - Manglish means Malayalam spoken language written using Latin letters.
@@ -229,11 +230,15 @@ def _training_status_reply() -> str:
 def _kernel_reply(response) -> str:
     if response.status == "confirmation_required" and response.pending_action is not None:
         action = response.pending_action
+        expires = action.expires_at_utc.isoformat()
         return (
             f"Confirmation required. Action ID: {action.action_id}\n"
             f"Skill: {action.skill_name}\n"
             f"Operation: {action.operation}\n"
-            f"Use /confirm {action.action_id} to execute the exact validated action."
+            f"Risk: {action.risk.value}\n"
+            f"Expires: {expires}\n"
+            f"Use /confirm {action.action_id} to execute the exact validated action, "
+            f"or /cancel {action.action_id}."
         )
 
     base = response.message
@@ -258,7 +263,10 @@ def _pending_reply(runtime) -> str:
         return "No pending kernel actions."
     lines = ["Pending actions:"]
     for action in pending:
-        lines.append(f"- {action.action_id}: {action.skill_name}.{action.operation}")
+        lines.append(
+            f"- {action.action_id}: {action.skill_name}.{action.operation} "
+            f"[{action.risk.value}] expires {action.expires_at_utc.isoformat()}"
+        )
     return "\n".join(lines)
 
 
@@ -271,7 +279,7 @@ def main():
 
     print(
         "NEXA ONLINE - Kernel + Memory + Teacher-Student + Workspace/File/Git/GitHub/Trading enabled.\n"
-        "Commands: /skills, /pending, /confirm <id>, /teacher-stats, /training-status, /exit.\n"
+        "Commands: /skills, /pending, /confirm <id>, /cancel <id>, /teacher-stats, /training-status, /exit.\n"
     )
 
     while True:
@@ -296,6 +304,13 @@ def main():
         if lowered.startswith("/confirm "):
             action_id = user.split(maxsplit=1)[1].strip()
             response = runtime.kernel.confirm(action_id)
+            reply = _kernel_reply(response)
+            save_message("user", user)
+            _record_reply(messages, user, reply)
+            continue
+        if lowered.startswith("/cancel "):
+            action_id = user.split(maxsplit=1)[1].strip()
+            response = runtime.kernel.cancel(action_id)
             reply = _kernel_reply(response)
             save_message("user", user)
             _record_reply(messages, user, reply)
