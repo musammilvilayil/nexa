@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -71,6 +72,7 @@ class TradeSignal:
     strategy_id: str
     stop_loss: float | None = None
     take_profit: float | None = None
+    generated_at_utc: datetime | None = None
 
     def __post_init__(self) -> None:
         symbol = self.symbol.strip().upper()
@@ -89,6 +91,12 @@ class TradeSignal:
             _positive_finite("take_profit", self.take_profit)
         if not 0.0 <= self.confidence <= 1.0:
             raise ValueError("confidence must be between 0 and 1")
+
+        if self.generated_at_utc is not None:
+            timestamp = self.generated_at_utc
+            if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+                raise ValueError("generated_at_utc must be timezone-aware")
+            object.__setattr__(self, "generated_at_utc", timestamp.astimezone(timezone.utc))
 
 
 @dataclass(frozen=True)
