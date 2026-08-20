@@ -1,6 +1,7 @@
 """Trading-first NEXA skill package."""
 
 from .backtest import BacktestEngine, BacktestReport, BacktestTrade, EquityPoint
+from .brain import TradingBrain, TradingBrainResearchResult
 from .data_provider import CSVMarketDataProvider, MarketDataProvider
 from .indicators import atr, ema, highest, lowest, sma, true_range
 from .journal import TradingJournal
@@ -110,6 +111,8 @@ __all__ = [
     "StrategyStage",
     "TradeSide",
     "TradeSignal",
+    "TradingBrain",
+    "TradingBrainResearchResult",
     "TradingJournal",
     "TradingKillSwitch",
     "TradingMandate",
