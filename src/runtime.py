@@ -7,6 +7,7 @@ from pathlib import Path
 from core import ContextBus, NexaKernel, SQLiteAuditLedger, SkillRegistry
 from skills.file_skill import FileSkill
 from skills.git_plugin import GitPlugin
+from skills.github_skill import GitHubSkill
 from skills.trading import PaperBroker, TradingMandate, TradingMode, TradingSkill
 from skills.workspace_skill import WorkspaceSkill
 from workspace import WorkspaceManager
@@ -81,6 +82,10 @@ def build_trading_mandate() -> TradingMandate:
     raw_strategies = os.getenv("NEXA_TRADING_STRATEGIES", "adaptive_momentum")
     strategies = tuple(item.strip() for item in raw_strategies.split(",") if item.strip())
 
+    confidence = float(os.getenv("NEXA_MIN_SIGNAL_CONFIDENCE", "0.60"))
+    if not 0.0 <= confidence <= 1.0:
+        raise ValueError("NEXA_MIN_SIGNAL_CONFIDENCE must be between 0 and 1")
+
     return TradingMandate(
         mode=mode,
         allowed_symbols=symbols,
@@ -90,7 +95,7 @@ def build_trading_mandate() -> TradingMandate:
         max_risk_per_trade=_float_env("NEXA_MAX_RISK_PER_TRADE", 250.0),
         max_daily_loss=_float_env("NEXA_MAX_DAILY_LOSS", 500.0),
         max_open_positions=_int_env("NEXA_MAX_OPEN_POSITIONS", 3),
-        min_signal_confidence=float(os.getenv("NEXA_MIN_SIGNAL_CONFIDENCE", "0.60")),
+        min_signal_confidence=confidence,
         allow_short=_bool_env("NEXA_ALLOW_SHORT", False),
         require_stop_loss=_bool_env("NEXA_REQUIRE_STOP_LOSS", True),
     )
@@ -113,12 +118,15 @@ def build_runtime() -> NexaRuntime:
     registry.register(WorkspaceSkill(workspace_manager, context_bus))
     registry.register(FileSkill())
     registry.register(GitPlugin())
+    registry.register(GitHubSkill(workspace_manager, context_bus))
 
     mandate = build_trading_mandate()
     trading_skill = TradingSkill(mandate, PaperBroker())
     registry.register(trading_skill)
 
-    audit_path = Path(os.getenv("NEXA_AUDIT_DB", str(PROJECT_ROOT / "data" / "actions.db"))).expanduser().resolve()
+    audit_path = Path(
+        os.getenv("NEXA_AUDIT_DB", str(PROJECT_ROOT / "data" / "actions.db"))
+    ).expanduser().resolve()
     audit = SQLiteAuditLedger(audit_path)
     kernel = NexaKernel(
         registry=registry,
@@ -126,7 +134,7 @@ def build_runtime() -> NexaRuntime:
         audit_ledger=audit,
     )
     context_bus.set_environment_flag("gemini_available", bool(os.getenv("GEMINI_API_KEY", "").strip()))
-    context_bus.set_environment_flag("ollama_url", os.getenv("OLLAMA_URL", "http://localhost:11434"))
+    context_bus.set_environment_flag("ollama_url", os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"))
     context_bus.set_environment_flag("trading_mode", mandate.mode.value)
 
     return NexaRuntime(
