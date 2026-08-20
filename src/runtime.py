@@ -14,6 +14,7 @@ from skills.trading import (
     LiveArmController,
     LiveExecutionController,
     PaperBroker,
+    PaperEvidenceStore,
     PaperStateStore,
     StrategyPromotionStore,
     TradingBrain,
@@ -42,6 +43,7 @@ class NexaRuntime:
     trading_brain: TradingBrain
     promotion_store: StrategyPromotionStore
     paper_state_store: PaperStateStore
+    paper_evidence_store: PaperEvidenceStore
     live_arm: LiveArmController
     kill_switch: TradingKillSwitch
     live_controller: LiveExecutionController | None
@@ -162,6 +164,10 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
         )
     ).expanduser().resolve()
     paper_state_store = PaperStateStore(paper_path)
+    paper_evidence_store = PaperEvidenceStore(
+        paper_path,
+        initial_equity=_float_env("NEXA_PAPER_INITIAL_EQUITY", 100_000.0),
+    )
     paper_broker = PaperBroker(state_store=paper_state_store)
     trading_skill = TradingSkill(mandate, paper_broker)
     registry.register(trading_skill)
@@ -178,6 +184,7 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
         strategy=AdaptiveStrategyRouter(),
         promotion_store=promotion_store,
         paper_broker=paper_broker,
+        paper_evidence_store=paper_evidence_store,
     )
 
     live_arm = LiveArmController()
@@ -219,6 +226,7 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
     context_bus.set_environment_flag("trading_strategy", trading_brain.strategy.strategy_id)
     context_bus.set_environment_flag("live_broker_configured", live_broker is not None)
     context_bus.set_environment_flag("paper_state_persistent", True)
+    context_bus.set_environment_flag("paper_evidence_persistent", True)
 
     return NexaRuntime(
         kernel=kernel,
@@ -231,6 +239,7 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
         trading_brain=trading_brain,
         promotion_store=promotion_store,
         paper_state_store=paper_state_store,
+        paper_evidence_store=paper_evidence_store,
         live_arm=live_arm,
         kill_switch=kill_switch,
         live_controller=live_controller,
