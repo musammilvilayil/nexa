@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from .market import MarketSeries, validate_market_series
 from .models import TradingMandate, TradingMode
 from .paper import PaperBroker
+from .paper_evidence import PaperEvidenceReport, PaperEvidenceStore
 from .promotion import (
     PromotionDecision,
     StrategyPromotionGate,
@@ -27,8 +28,9 @@ class TradingBrain:
     """High-level trading orchestration without broker-specific live execution.
 
     The brain connects data validation, out-of-sample research, strategy
-    promotion, and autonomous paper execution. It never promotes a failed
-    strategy and never turns research completion into live authorization.
+    promotion, autonomous paper execution, and persistent paper evidence. It
+    never promotes a failed strategy and never turns research or paper evidence
+    into live authorization by itself.
     """
 
     def __init__(
@@ -40,6 +42,7 @@ class TradingBrain:
         research_pipeline: TradingResearchPipeline | None = None,
         promotion_gate: StrategyPromotionGate | None = None,
         paper_broker: PaperBroker | None = None,
+        paper_evidence_store: PaperEvidenceStore | None = None,
         max_market_age_seconds: float | None = None,
     ) -> None:
         self.mandate = mandate
@@ -48,6 +51,7 @@ class TradingBrain:
         self.promotion_gate = promotion_gate or StrategyPromotionGate()
         self.promotion_store = promotion_store
         self.paper_broker = paper_broker or PaperBroker()
+        self.paper_evidence_store = paper_evidence_store
         self.max_market_age_seconds = max_market_age_seconds
         self.promotion_store.register(self.strategy.strategy_id)
         self._paper_trader: AutonomousPaperTrader | None = None
@@ -103,7 +107,27 @@ class TradingBrain:
             return PaperCycleResult("disabled", "paper runtime is not armed")
         if self.stage not in {StrategyStage.PAPER, StrategyStage.LIVE_ELIGIBLE}:
             return PaperCycleResult("blocked", "strategy promotion state no longer permits paper execution")
-        return self._paper_trader.on_market_update(series)
+
+        result = self._paper_trader.on_market_update(series)
+        if self.paper_evidence_store is not None and result.status in {
+            "entered",
+            "holding",
+            "exit",
+            "no_trade",
+            "rejected",
+        }:
+            self.paper_evidence_store.record_activity(series.last.timestamp.date())
+        return result
+
+    def paper_evidence(self) -> PaperEvidenceReport | None:
+        if self.paper_evidence_store is None:
+            return None
+        return self.paper_evidence_store.report()
+
+    def start_new_paper_evidence_session(self, note: str) -> str:
+        if self.paper_evidence_store is None:
+            raise RuntimeError("paper evidence store is not configured")
+        return self.paper_evidence_store.start_new_session(note)
 
     def disable_strategy(self, reason: str) -> None:
         self.promotion_store.disable(self.strategy.strategy_id, reason)
