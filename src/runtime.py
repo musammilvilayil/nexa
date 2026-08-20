@@ -127,6 +127,11 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
     code. Even then, ordinary live entries remain blocked until the mandate is
     LIVE_AUTONOMOUS, the strategy is LIVE_ELIGIBLE, and LiveArmController is
     owner-confirmed for the exact mandate fingerprint.
+
+    ContextBus stores only stable configuration facts here. Dynamic safety state
+    such as current promotion stage, kill-switch state, and live arm state is
+    queried from the owning trading components so a cached context flag cannot
+    become a false source of truth.
     """
 
     context_bus = ContextBus()
@@ -204,10 +209,7 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
     context_bus.set_environment_flag("ollama_url", os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434"))
     context_bus.set_environment_flag("trading_mode", mandate.mode.value)
     context_bus.set_environment_flag("trading_strategy", trading_brain.strategy.strategy_id)
-    context_bus.set_environment_flag("trading_stage", trading_brain.stage.value)
     context_bus.set_environment_flag("live_broker_configured", live_broker is not None)
-    context_bus.set_environment_flag("live_session_armed", live_arm.armed)
-    context_bus.set_environment_flag("kill_switch_active", kill_switch.active)
 
     return NexaRuntime(
         kernel=kernel,
