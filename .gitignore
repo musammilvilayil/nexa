@@ -6,3 +6,4 @@ data/generated_skills/
 logs/
 .env
 .env.*
+data/market/*.csv
