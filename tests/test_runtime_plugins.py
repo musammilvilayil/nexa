@@ -13,6 +13,7 @@ from core import ContextBus
 from runtime import build_runtime
 from skills.file_skill import FileSkill
 from skills.github_skill import GitHubSkill
+from skills.trading import TradingControlSkill
 from skills.workspace_skill import WorkspaceSkill
 from workspace import WorkspaceManager
 
@@ -102,11 +103,16 @@ class RuntimeBuilderTests(unittest.TestCase):
             self.assertIn("git", names)
             self.assertIn("github", names)
             self.assertIn("trading", names)
+            self.assertIn("trading_control", names)
             self.assertIsInstance(runtime.github_skill, GitHubSkill)
+            self.assertIsInstance(runtime.trading_control_skill, TradingControlSkill)
             self.assertEqual(runtime.trading_skill.mandate.mode.value, "research")
             self.assertEqual(runtime.trading_brain.strategy.strategy_id, "adaptive_router_v1")
             self.assertEqual(runtime.trading_brain.stage.value, "research")
             self.assertEqual(runtime.trading_skill.mandate.allowed_strategies, ("adaptive_router_v1",))
+            self.assertIsNone(runtime.live_controller)
+            self.assertFalse(runtime.live_arm.armed)
+            self.assertFalse(runtime.kill_switch.active)
             self.assertTrue(audit.exists())
             self.assertTrue(strategy_db.exists())
 
