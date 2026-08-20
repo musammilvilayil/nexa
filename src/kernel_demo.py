@@ -13,7 +13,7 @@ def build_demo_kernel() -> NexaKernel:
 def main() -> None:
     kernel = build_demo_kernel()
 
-    print("NEXA Kernel v0.1 demo online. Type /exit to stop.")
+    print("NEXA Kernel demo online. Type /exit to stop.")
     print("Try: system ping | remember hello | publish origin")
 
     while True:
@@ -32,6 +32,7 @@ def main() -> None:
             print(
                 "Pending action "
                 f"{action.action_id}: {action.skill_name}.{action.operation} "
+                f"risk={action.risk.value} expires={action.expires_at_utc.isoformat()} "
                 f"params={dict(action.params)}"
             )
             confirm = input("Confirm? [y/N]: ").strip().lower()
@@ -39,7 +40,8 @@ def main() -> None:
                 confirmed = kernel.confirm(action.action_id)
                 print(f"NEXA Kernel [{confirmed.status}]: {confirmed.message}")
             else:
-                print("Action left unexecuted.")
+                cancelled = kernel.cancel(action.action_id)
+                print(f"NEXA Kernel [{cancelled.status}]: {cancelled.message}")
 
 
 if __name__ == "__main__":
