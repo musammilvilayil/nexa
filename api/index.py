@@ -31,11 +31,15 @@ def _payload(response):
             "error": response.result.error,
         }
     if response.pending_action is not None:
+        action = response.pending_action
         data["pending_action"] = {
-            "action_id": response.pending_action.action_id,
-            "skill": response.pending_action.skill_name,
-            "operation": response.pending_action.operation,
-            "params": dict(response.pending_action.params),
+            "action_id": action.action_id,
+            "skill": action.skill_name,
+            "operation": action.operation,
+            "params": dict(action.params),
+            "risk": action.risk.value,
+            "created_at_utc": action.created_at_utc.isoformat(),
+            "expires_at_utc": action.expires_at_utc.isoformat(),
         }
     return data
 
@@ -54,11 +58,11 @@ class handler(BaseHTTPRequestHandler):
         self._send_json(
             200,
             {
-                "name": "NEXA Kernel v0.1",
+                "name": "NEXA Kernel demo",
                 "status": "ready",
                 "demo_skill": "dummy",
                 "commands": ["system ping", "remember hello", "publish origin"],
-                "note": "Hosted demo exposes only the safe DummySkill. Local Git, files, Ollama, and secrets are not exposed.",
+                "note": "Hosted demo exposes only the safe DummySkill. Local Git, files, trading, Ollama, and secrets are not exposed.",
             },
         )
 
@@ -70,6 +74,8 @@ class handler(BaseHTTPRequestHandler):
 
             if request.get("confirm"):
                 response = kernel.confirm(str(request["confirm"]))
+            elif request.get("cancel"):
+                response = kernel.cancel(str(request["cancel"]))
             else:
                 command = str(request.get("command", "")).strip()
                 if not command:
