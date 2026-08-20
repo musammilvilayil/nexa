@@ -33,7 +33,7 @@ class GitHubSkill:
         )
         self.metadata = SkillMetadata(
             name="github",
-            version="0.1.0",
+            version="0.2.0",
             description="Safe GitHub platform operations through authenticated gh CLI",
             operations=(
                 OperationSpec("auth_status", "Inspect gh authentication", RiskTier.READ),
@@ -191,7 +191,12 @@ class GitHubSkill:
                 return ExecutionResult(True, "GitHub repository inspected", data=data)
 
             if operation == "clone":
-                destination: Path = params["destination"]
+                destination: Path = Path(params["destination"]).resolve()
+                root = self._clone_root().resolve()
+                if not destination.is_relative_to(root):
+                    return ExecutionResult(False, "clone destination escaped workspace root", error="unsafe destination")
+                if destination.exists():
+                    return ExecutionResult(False, "clone destination appeared after validation; submit again", error="stale precondition")
                 result = self.bridge.run(
                     "gh",
                     ["repo", "clone", str(params["repo"]), str(destination)],
@@ -205,17 +210,26 @@ class GitHubSkill:
                 args = ["repo", "create", str(params["name"]), f"--{params['visibility']}"]
                 destination: Path | None = params.get("destination")
                 if bool(params["clone"]):
+                    if destination is None:
+                        return ExecutionResult(False, "clone destination missing", error="invalid validated state")
+                    destination = Path(destination).resolve()
+                    root = self._clone_root().resolve()
+                    if not destination.is_relative_to(root):
+                        return ExecutionResult(False, "repository destination escaped workspace root", error="unsafe destination")
+                    if destination.exists():
+                        return ExecutionResult(False, "repository destination appeared after validation; submit again", error="stale precondition")
                     args.append("--clone")
-                    root = destination.parent if destination is not None else self._clone_root()
-                    result = self.bridge.run("gh", args, cwd=root)
-                    if result.ok and destination is not None and destination.exists():
+                    result = self.bridge.run("gh", args, cwd=destination.parent)
+                    if result.ok and destination.exists():
                         self._refresh_and_activate(destination)
                 else:
                     result = self.bridge.run("gh", args)
                 return self._result(result, "GitHub repository created" if result.ok else "Repository creation failed")
 
             if operation == "create_pr":
-                repo: Path = params["repo"]
+                repo = Path(params["repo"]).resolve()
+                if not repo.exists() or not repo.is_dir() or not ((repo / ".git").exists()):
+                    return ExecutionResult(False, "active repository changed or disappeared; submit again", error="stale precondition")
                 result = self.bridge.run(
                     "gh",
                     ["pr", "create", "--base", str(params["base"]), "--title", str(params["title"]), "--body", ""],
