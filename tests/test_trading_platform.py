@@ -62,7 +62,7 @@ def live_mandate():
     )
 
 
-def entry_signal():
+def entry_signal(*, generated_at_utc=None):
     return TradeSignal(
         "NIFTY",
         TradeSide.BUY,
@@ -71,6 +71,7 @@ def entry_signal():
         "adaptive_momentum_v1",
         98.0,
         104.0,
+        generated_at_utc or datetime.now(timezone.utc),
     )
 
 
@@ -123,6 +124,38 @@ class TradingPlatformTests(unittest.TestCase):
             self.assertTrue(first.accepted)
             self.assertTrue(second.accepted)
             self.assertEqual(len(broker.requests), 2)
+
+    def test_stale_live_entry_activates_kill_switch_without_order(self):
+        with tempfile.TemporaryDirectory() as temp:
+            promotion = StrategyPromotionStore(Path(temp) / "promotion.db")
+            promotion.register("adaptive_momentum_v1")
+            promotion.set_stage("adaptive_momentum_v1", StrategyStage.LIVE_ELIGIBLE, ("test",))
+            mandate = live_mandate()
+            arm = LiveArmController()
+            arm.arm(
+                mandate,
+                owner_confirmed=True,
+                live_eligible_strategies=("adaptive_momentum_v1",),
+            )
+            switch = TradingKillSwitch()
+            broker = FakeBroker()
+            controller = LiveExecutionController(
+                mandate=mandate,
+                broker=broker,
+                promotion_store=promotion,
+                arm=arm,
+                kill_switch=switch,
+                max_signal_age_seconds=30,
+            )
+            now = datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc)
+            stale = entry_signal(generated_at_utc=now - timedelta(seconds=31))
+
+            result = controller.execute(stale, now=now)
+
+            self.assertFalse(result.accepted)
+            self.assertIn("stale", result.reason)
+            self.assertTrue(switch.active)
+            self.assertEqual(broker.requests, [])
 
     def test_mandate_change_invalidates_live_arm(self):
         arm = LiveArmController()
