@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
-from core import ContextBus, ExecutionResult, OperationSpec, RiskTier, SkillMatch, SkillMetadata
+from core import ExecutionResult, OperationSpec, RiskTier, SkillMatch, SkillMetadata
 
 from .live import LiveArmController, LiveExecutionController, TradingKillSwitch
 from .models import TradingMandate, TradingMode
@@ -17,6 +17,9 @@ class TradingControlSkill:
     the safety envelope: inspect state, activate/disarm safety immediately, and
     confirmation-gated clearing/arming operations. Live strategy eligibility is
     checked both when an arm request is validated and again at execution time.
+
+    Dynamic safety state is read directly from its owning objects rather than
+    copied into ContextBus, avoiding stale arm/kill/promotion flags.
     """
 
     def __init__(
@@ -26,18 +29,16 @@ class TradingControlSkill:
         promotion_store: StrategyPromotionStore,
         live_arm: LiveArmController,
         kill_switch: TradingKillSwitch,
-        context_bus: ContextBus,
         live_controller: LiveExecutionController | None = None,
     ) -> None:
         self.mandate = mandate
         self.promotion_store = promotion_store
         self.live_arm = live_arm
         self.kill_switch = kill_switch
-        self.context_bus = context_bus
         self.live_controller = live_controller
         self.metadata = SkillMetadata(
             name="trading_control",
-            version="0.2.0",
+            version="0.3.0",
             description="Owner control plane for live arming, disarming, and kill-switch state",
             operations=(
                 OperationSpec("status", "Inspect live trading control state", RiskTier.READ),
@@ -89,14 +90,10 @@ class TradingControlSkill:
         context: Mapping[str, Any],
     ) -> ExecutionResult:
         if operation == "status":
-            stages = {
-                strategy_id: (
-                    self.promotion_store.stage(strategy_id).value
-                    if self.promotion_store.stage(strategy_id) is not None
-                    else "unregistered"
-                )
-                for strategy_id in self.mandate.allowed_strategies
-            }
+            stages = {}
+            for strategy_id in self.mandate.allowed_strategies:
+                stage = self.promotion_store.stage(strategy_id)
+                stages[strategy_id] = stage.value if stage is not None else "unregistered"
             return ExecutionResult(
                 True,
                 "Live trading control state",
@@ -112,17 +109,14 @@ class TradingControlSkill:
 
         if operation == "activate_kill":
             self.kill_switch.activate(str(params["reason"]))
-            self._sync_flags()
             return ExecutionResult(True, "Trading kill switch activated")
 
         if operation == "disarm_live":
             self.live_arm.disarm()
-            self._sync_flags()
             return ExecutionResult(True, "Live autonomous trading disarmed")
 
         if operation == "clear_kill":
             self.kill_switch.clear(owner_confirmed=True)
-            self._sync_flags()
             return ExecutionResult(True, "Trading kill switch cleared")
 
         if operation == "arm_live":
@@ -143,7 +137,6 @@ class TradingControlSkill:
                 owner_confirmed=True,
                 live_eligible_strategies=current_eligible,
             )
-            self._sync_flags()
             return ExecutionResult(True, "Live autonomous trading armed for the exact owner mandate")
 
         return ExecutionResult(False, "unknown trading-control operation", error="unknown operation")
@@ -163,7 +156,3 @@ class TradingControlSkill:
         if ineligible:
             raise PermissionError("live-ineligible strategies: " + ", ".join(ineligible))
         return tuple(self.mandate.allowed_strategies)
-
-    def _sync_flags(self) -> None:
-        self.context_bus.set_environment_flag("live_session_armed", self.live_arm.is_armed_for(self.mandate))
-        self.context_bus.set_environment_flag("kill_switch_active", self.kill_switch.active)
