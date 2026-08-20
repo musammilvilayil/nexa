@@ -2,6 +2,13 @@
 
 from .backtest import BacktestEngine, BacktestReport, BacktestTrade, EquityPoint
 from .brain import TradingBrain, TradingBrainResearchResult
+from .broker_config import (
+    BrokerFactoryRegistry,
+    BrokerSelection,
+    TrustedBrokerFactory,
+    broker_selection_from_env,
+    build_selected_trusted_broker,
+)
 from .control_skill import TradingControlSkill
 from .data_provider import CSVMarketDataProvider, MarketDataProvider
 from .indicators import atr, ema, highest, lowest, sma, true_range
@@ -71,7 +78,9 @@ __all__ = [
     "BacktestReport",
     "BacktestTrade",
     "BrokerAdapter",
+    "BrokerFactoryRegistry",
     "BrokerHealth",
+    "BrokerSelection",
     "CSVMarketDataProvider",
     "Candle",
     "DataQualityReport",
@@ -131,9 +140,12 @@ __all__ = [
     "TradingMode",
     "TradingResearchPipeline",
     "TradingSkill",
+    "TrustedBrokerFactory",
     "WalkForwardSplitter",
     "WalkForwardWindow",
     "atr",
+    "broker_selection_from_env",
+    "build_selected_trusted_broker",
     "calculate_metrics",
     "ema",
     "highest",
