@@ -103,6 +103,20 @@ class GitHubSkillTests(unittest.TestCase):
             self.assertTrue(destination.is_relative_to(root))
             self.assertEqual(destination.name, "demo")
 
+    def test_clone_rechecks_destination_after_confirmation_delay(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            bridge = FakeBridge(stdout="cloned")
+            skill, _, _ = self._skill(root, bridge=bridge)
+            params = skill.validate("clone", {"repo": "owner/demo"}, {})
+            params["destination"].mkdir()
+
+            result = skill.execute("clone", params, {})
+
+            self.assertFalse(result.success)
+            self.assertIn("appeared after validation", result.message)
+            self.assertEqual(bridge.calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()
