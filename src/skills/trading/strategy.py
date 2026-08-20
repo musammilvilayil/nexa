@@ -87,6 +87,7 @@ class AdaptiveMomentumStrategy:
             return StrategyDecision(None, regime, "indicator unavailable")
 
         price = series.last.close
+        signal_time = series.last.utc_timestamp
         if regime.regime == MarketRegime.TRENDING_UP:
             breakout_fraction = max(0.0, (price - prior_high) / prior_high)
             if price <= prior_high or breakout_fraction < self.config.minimum_breakout_fraction:
@@ -104,6 +105,7 @@ class AdaptiveMomentumStrategy:
                     take_profit=target,
                     confidence=confidence,
                     strategy_id=self.strategy_id,
+                    generated_at_utc=signal_time,
                 ),
                 regime,
                 "trend breakout confirmed",
@@ -128,6 +130,7 @@ class AdaptiveMomentumStrategy:
                     take_profit=target,
                     confidence=confidence,
                     strategy_id=self.strategy_id,
+                    generated_at_utc=signal_time,
                 ),
                 regime,
                 "trend breakdown confirmed",
@@ -188,6 +191,7 @@ class MeanReversionStrategy:
             return StrategyDecision(None, regime, "moving average unavailable")
         price = series.last.close
         deviation = (price - mean) / mean
+        signal_time = series.last.utc_timestamp
 
         if deviation <= -self.config.entry_deviation:
             stop = mean * (1.0 - self.config.stop_deviation)
@@ -197,7 +201,16 @@ class MeanReversionStrategy:
             target = price + (risk * self.config.reward_to_risk)
             confidence = min(0.90, 0.60 + abs(deviation) * 4.0)
             return StrategyDecision(
-                TradeSignal(series.symbol, TradeSide.BUY, price, confidence, self.strategy_id, stop, target),
+                TradeSignal(
+                    series.symbol,
+                    TradeSide.BUY,
+                    price,
+                    confidence,
+                    self.strategy_id,
+                    stop,
+                    target,
+                    signal_time,
+                ),
                 regime,
                 "range downside deviation detected",
             )
@@ -212,7 +225,16 @@ class MeanReversionStrategy:
                 return StrategyDecision(None, regime, "invalid short target")
             confidence = min(0.90, 0.60 + abs(deviation) * 4.0)
             return StrategyDecision(
-                TradeSignal(series.symbol, TradeSide.SELL, price, confidence, self.strategy_id, stop, target),
+                TradeSignal(
+                    series.symbol,
+                    TradeSide.SELL,
+                    price,
+                    confidence,
+                    self.strategy_id,
+                    stop,
+                    target,
+                    signal_time,
+                ),
                 regime,
                 "range upside deviation detected",
             )
@@ -268,5 +290,6 @@ class AdaptiveStrategyRouter:
             strategy_id=self.strategy_id,
             stop_loss=signal.stop_loss,
             take_profit=signal.take_profit,
+            generated_at_utc=signal.generated_at_utc,
         )
         return StrategyDecision(routed, decision.regime, decision.reason)
