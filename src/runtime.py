@@ -23,6 +23,7 @@ class NexaRuntime:
     context_bus: ContextBus
     workspace_manager: WorkspaceManager
     trading_skill: TradingSkill
+    github_skill: GitHubSkill
 
 
 def _workspace_roots() -> tuple[Path, ...]:
@@ -118,7 +119,9 @@ def build_runtime() -> NexaRuntime:
     registry.register(WorkspaceSkill(workspace_manager, context_bus))
     registry.register(FileSkill())
     registry.register(GitPlugin())
-    registry.register(GitHubSkill(workspace_manager, context_bus))
+
+    github_skill = GitHubSkill(workspace_manager, context_bus)
+    registry.register(github_skill)
 
     mandate = build_trading_mandate()
     trading_skill = TradingSkill(mandate, PaperBroker())
@@ -143,4 +146,5 @@ def build_runtime() -> NexaRuntime:
         context_bus=context_bus,
         workspace_manager=workspace_manager,
         trading_skill=trading_skill,
+        github_skill=github_skill,
     )
