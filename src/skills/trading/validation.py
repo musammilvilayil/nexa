@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from .market import MarketSeries
@@ -91,11 +92,7 @@ class StrategyEvaluator:
             if total_trades
             else 0.0
         )
-        gross_profit = sum(max(0.0, item.net_pnl) for item in metrics)
-        gross_loss = abs(sum(min(0.0, item.net_pnl) for item in metrics))
-        aggregate_profit_factor = float("inf") if gross_loss == 0 and gross_profit > 0 else (
-            gross_profit / gross_loss if gross_loss > 0 else 0.0
-        )
+        aggregate_profit_factor = self._aggregate_profit_factor(metrics, total_trades)
 
         reasons: list[str] = []
         t = self.thresholds
@@ -116,3 +113,38 @@ class StrategyEvaluator:
             windows=len(metrics),
             positive_windows=positive_windows,
         )
+
+    @staticmethod
+    def _aggregate_profit_factor(
+        metrics: tuple[PerformanceMetrics, ...],
+        total_trades: int,
+    ) -> float:
+        gross_profit = sum(item.gross_profit for item in metrics)
+        gross_loss = sum(item.gross_loss for item in metrics)
+        if gross_profit > 0 or gross_loss > 0:
+            if gross_loss == 0:
+                return math.inf if gross_profit > 0 else 0.0
+            return gross_profit / gross_loss
+
+        # Backward-compatible path for hand-constructed metrics that predate the
+        # explicit gross-profit/gross-loss fields used by real backtest output.
+        if total_trades <= 0:
+            return 0.0
+        if all(math.isinf(item.profit_factor) for item in metrics if item.trades > 0):
+            return math.inf
+        weighted = 0.0
+        weight = 0
+        for item in metrics:
+            if item.trades <= 0:
+                continue
+            factor = item.profit_factor
+            if math.isinf(factor):
+                factor = max(10.0, StrategyEvaluator._finite_profit_factor_cap(metrics))
+            weighted += factor * item.trades
+            weight += item.trades
+        return weighted / weight if weight else 0.0
+
+    @staticmethod
+    def _finite_profit_factor_cap(metrics: tuple[PerformanceMetrics, ...]) -> float:
+        finite = [item.profit_factor for item in metrics if math.isfinite(item.profit_factor)]
+        return max(finite, default=10.0)
