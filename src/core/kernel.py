@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from .audit import AuditLedger, AuditStatus
@@ -19,6 +20,9 @@ class PendingAction:
     operation: str
     params: Mapping[str, Any]
     context: ContextSnapshot
+    risk: RiskTier
+    created_at_utc: datetime
+    expires_at_utc: datetime
 
 
 @dataclass(frozen=True)
@@ -36,6 +40,11 @@ class NexaKernel:
     The kernel resolves registered skills, validates arguments, applies generic
     risk policy, dispatches execution, and preserves exact pending actions for
     later confirmation. It contains no capability-specific logic.
+
+    Remote/destructive confirmations are short-lived. Confirmation executes the
+    exact validated parameters and context snapshot; user/model text is never
+    reparsed. Skills remain responsible for rechecking mutable external
+    preconditions immediately before side effects.
     """
 
     def __init__(
@@ -45,15 +54,23 @@ class NexaKernel:
         security_gate: SecurityGate | None = None,
         dispatcher: Dispatcher | None = None,
         audit_ledger: AuditLedger | None = None,
+        *,
+        pending_ttl_seconds: float = 300.0,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
+        if pending_ttl_seconds <= 0:
+            raise ValueError("pending_ttl_seconds must be positive")
         self.registry = registry or SkillRegistry()
         self.context_bus = context_bus or ContextBus()
         self.security_gate = security_gate or SecurityGate()
         self.dispatcher = dispatcher or Dispatcher()
         self.audit_ledger = audit_ledger
+        self.pending_ttl_seconds = float(pending_ttl_seconds)
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._pending: dict[str, PendingAction] = {}
 
     def process(self, text: str) -> KernelResponse:
+        self._expire_pending()
         snapshot = self.context_bus.snapshot()
         context = snapshot.as_mapping()
         match = self.registry.resolve(text, context)
@@ -117,12 +134,16 @@ class NexaKernel:
             )
 
         if decision.outcome == PolicyOutcome.REQUIRE_CONFIRMATION:
+            now = self._utc_now()
             action = PendingAction(
                 action_id=action_id,
                 skill_name=skill.metadata.name,
                 operation=match.operation,
                 params=dict(validated),
                 context=snapshot,
+                risk=spec.risk,
+                created_at_utc=now,
+                expires_at_utc=now + timedelta(seconds=self.pending_ttl_seconds),
             )
             audit_error = self._record_safely(
                 action_id=action_id,
@@ -157,9 +178,27 @@ class NexaKernel:
         )
 
     def confirm(self, action_id: str) -> KernelResponse:
-        action = self._pending.pop(action_id, None)
+        action = self._pending.pop(action_id.strip(), None)
         if action is None:
+            self._expire_pending()
             return KernelResponse(status="error", message="Pending action not found.")
+
+        if self._is_expired(action):
+            audit_error = self._record_safely(
+                action_id=action.action_id,
+                skill_name=action.skill_name,
+                operation=action.operation,
+                params=action.params,
+                risk=action.risk,
+                status=AuditStatus.EXPIRED,
+                error="confirmation window expired",
+            )
+            suffix = f"; audit failed: {audit_error}" if audit_error else ""
+            return KernelResponse(
+                status="expired",
+                message=f"Pending action expired; submit the request again.{suffix}",
+                action_id=action.action_id,
+            )
 
         skill = self.registry.get(action.skill_name)
         spec = skill.metadata.operation(action.operation)
@@ -168,6 +207,23 @@ class NexaKernel:
                 status="error",
                 message="Pending operation is no longer registered.",
                 action_id=action_id,
+            )
+        if spec.risk != action.risk:
+            audit_error = self._record_safely(
+                action_id=action.action_id,
+                skill_name=action.skill_name,
+                operation=action.operation,
+                params=action.params,
+                risk=action.risk,
+                status=AuditStatus.DENIED,
+                confirmed=True,
+                error="operation risk metadata changed after validation",
+            )
+            suffix = f"; audit failed: {audit_error}" if audit_error else ""
+            return KernelResponse(
+                status="denied",
+                message=f"Operation risk changed after validation; submit the request again.{suffix}",
+                action_id=action.action_id,
             )
 
         decision = self.security_gate.decide(spec.risk, confirmed=True)
@@ -189,8 +245,6 @@ class NexaKernel:
                 action_id=action_id,
             )
 
-        # Confirmation executes the exact validated request stored earlier.
-        # User/model text is never parsed a second time.
         return self._execute(
             action_id=action.action_id,
             skill_name=action.skill_name,
@@ -201,8 +255,53 @@ class NexaKernel:
             confirmed=True,
         )
 
+    def cancel(self, action_id: str) -> KernelResponse:
+        action = self._pending.pop(action_id.strip(), None)
+        if action is None:
+            self._expire_pending()
+            return KernelResponse(status="error", message="Pending action not found.")
+        audit_error = self._record_safely(
+            action_id=action.action_id,
+            skill_name=action.skill_name,
+            operation=action.operation,
+            params=action.params,
+            risk=action.risk,
+            status=AuditStatus.CANCELLED,
+            error="cancelled by owner",
+        )
+        suffix = f"; audit failed: {audit_error}" if audit_error else ""
+        return KernelResponse(
+            status="cancelled",
+            message=f"Pending action cancelled.{suffix}",
+            action_id=action.action_id,
+        )
+
     def pending_actions(self) -> tuple[PendingAction, ...]:
-        return tuple(self._pending.values())
+        self._expire_pending()
+        return tuple(sorted(self._pending.values(), key=lambda item: item.created_at_utc))
+
+    def _expire_pending(self) -> None:
+        expired = [action for action in self._pending.values() if self._is_expired(action)]
+        for action in expired:
+            self._pending.pop(action.action_id, None)
+            self._record_safely(
+                action_id=action.action_id,
+                skill_name=action.skill_name,
+                operation=action.operation,
+                params=action.params,
+                risk=action.risk,
+                status=AuditStatus.EXPIRED,
+                error="confirmation window expired",
+            )
+
+    def _is_expired(self, action: PendingAction) -> bool:
+        return self._utc_now() >= action.expires_at_utc
+
+    def _utc_now(self) -> datetime:
+        value = self._clock()
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("kernel clock must return a timezone-aware datetime")
+        return value.astimezone(timezone.utc)
 
     def _execute(
         self,
