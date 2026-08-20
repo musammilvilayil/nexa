@@ -221,7 +221,13 @@ class MeanReversionStrategy:
 
 
 class AdaptiveStrategyRouter:
-    """Selects a baseline strategy from the detected market regime."""
+    """Selects a baseline strategy from the detected market regime.
+
+    Child strategies generate the concrete signal, but the router rewrites the
+    strategy id to its own stable id so mandate authorization, research
+    promotion, paper execution, and future live eligibility all refer to one
+    reviewed adaptive strategy contract.
+    """
 
     def __init__(
         self,
@@ -245,7 +251,22 @@ class AdaptiveStrategyRouter:
     def evaluate(self, series: MarketSeries) -> StrategyDecision:
         reading = self.regime_detector.detect(series)
         if reading.regime in {MarketRegime.TRENDING_UP, MarketRegime.TRENDING_DOWN}:
-            return self.momentum.evaluate(series)
+            return self._as_router_decision(self.momentum.evaluate(series))
         if reading.regime == MarketRegime.RANGING:
-            return self.mean_reversion.evaluate(series)
+            return self._as_router_decision(self.mean_reversion.evaluate(series))
         return StrategyDecision(None, reading, "uncertain regime: no trade")
+
+    def _as_router_decision(self, decision: StrategyDecision) -> StrategyDecision:
+        signal = decision.signal
+        if signal is None:
+            return decision
+        routed = TradeSignal(
+            symbol=signal.symbol,
+            side=signal.side,
+            price=signal.price,
+            confidence=signal.confidence,
+            strategy_id=self.strategy_id,
+            stop_loss=signal.stop_loss,
+            take_profit=signal.take_profit,
+        )
+        return StrategyDecision(routed, decision.regime, decision.reason)
