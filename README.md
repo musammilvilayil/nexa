@@ -7,7 +7,10 @@ The project is built around a standalone kernel rather than a monolithic chatbot
 ## Current architecture
 
 ```text
-User / CLI
+Typed / Voice Transcript / Local API
+   |
+   v
+RuntimeControlPlane + KernelInputRouter
    |
    v
 NEXA Kernel
@@ -37,10 +40,13 @@ Trading platform
    |-- Backtester
    |-- Walk-forward evaluation
    |-- Strategy promotion ledger
-   |-- Autonomous paper trader
+   |-- Persistent autonomous paper trader
+   |-- Paper evidence ledger
+   |-- Bounded paper runtime service
    |-- LiveArmController
    |-- TradingKillSwitch
-   +-- BrokerAdapter contract
+   |-- BrokerAdapter contract
+   +-- Explicit trusted broker-factory registry
 
 Autonomous learning
    |-- Trading curriculum
@@ -67,6 +73,7 @@ Autonomous learning
 - API keys are read from environment secrets and are not stored in candidate code or audit parameters.
 - Generated skills are treated as untrusted until static validation and isolated tests pass.
 - Generated skills are staged outside the live source tree; autonomous training cannot rewrite the security kernel.
+- Typed input, voice transcripts, and local API commands route through the same kernel permission boundary.
 
 ## Trading safety model
 
@@ -90,9 +97,57 @@ Normal live orders are intended to run without per-trade confirmation after the 
 
 Risk-reducing exits are intentionally treated differently from new exposure so safety controls do not trap an existing position.
 
-**Important:** no broker-specific live adapter is enabled by default. `build_runtime()` creates no live broker from prompts or environment strings. Trusted application code must explicitly supply a reviewed `BrokerAdapter` implementation before a live controller exists.
+**Important:** no broker-specific live adapter is enabled by default. `build_runtime()` ignores broker-provider environment selectors and creates no live broker. Reviewed owner-controlled code must either pass a concrete `BrokerAdapter` directly or supply an explicit `BrokerFactoryRegistry` to `build_runtime_from_trusted_brokers()`. Environment text can select only a factory that trusted code already registered. Live execution is still disarmed after construction.
 
 Trading performance is uncertain. Backtests and paper results are evidence, not guarantees of future profit.
+
+## Persistent autonomous paper runtime
+
+Paper execution state survives restarts through the local `NEXA_PAPER_DB` SQLite database. Persisted state includes simulated orders, positions and realized PnL, duplicate-bar guards, protective stop/target context, and trading-date state.
+
+The same database also stores session-scoped paper evidence. Evidence reports include trading-day count, closed trades, reconstructed realized net PnL/drawdown, safety violations, and an integrity flag. Starting a new evidence session preserves prior history.
+
+Run a bounded paper cycle:
+
+```powershell
+python src\paper_runner.py --cycles 1
+```
+
+Run as a long-lived local service:
+
+```powershell
+python src\paper_runner.py --cycles 0
+```
+
+The runner fails closed unless the mandate is `paper_autonomous` and the strategy stage permits paper execution. It does not promote a research-only strategy merely because the runner was started.
+
+## Local control/status API
+
+`src/local_api.py` exposes the real local runtime, not the hosted demo kernel. Its action endpoints call `NexaKernel` through `RuntimeControlPlane`, so normal validation, confirmation, and audit rules still apply.
+
+```powershell
+python src\local_api.py
+```
+
+Default bind: `127.0.0.1:8765`.
+
+Endpoints:
+
+```text
+GET  /health
+GET  /status
+POST /command   {"command":"..."}
+POST /confirm   {"action_id":"..."}
+POST /cancel    {"action_id":"..."}
+```
+
+A non-loopback bind is refused unless `NEXA_LOCAL_API_TOKEN` is configured. The API intentionally exposes no direct live-order endpoint.
+
+## Voice/input boundary
+
+`input_adapters.py` defines provider-neutral typed/voice input contracts. `VoiceTranscriptAdapter` accepts already-transcribed speech from a reviewed STT integration, and `KernelInputRouter` always offers the transcript to `NexaKernel` first. Only a true `no_match` can reach an optional text-only language fallback, which receives no runtime or execution capability.
+
+This is the integration boundary for future microphone/STT work; it is deliberately not a permission bypass.
 
 ## Autonomous teacher-student learning
 
@@ -192,16 +247,16 @@ Pytest is also scoped to the real test suite:
 python -m pytest -q
 ```
 
-GitHub Actions runs both commands on pushes and pull requests.
+GitHub Actions runs both commands on pushes and pull requests. Build-completion tests are present, but this branch is intentionally code-first: the full local validation phase is performed after code freeze.
 
 ## Configuration
 
-See `config.example.env` for runtime variables. Real API keys, broker credentials, tokens, personal memory databases, and generated private artifacts must not be committed.
+See `config.example.env` for runtime variables. Real API keys, broker credentials, API tokens, personal memory databases, local market CSVs, and generated private artifacts must not be committed.
 
 The default trading mode is `research`.
 
 ## Project status
 
-The `trading-core-v0.1` branch contains the current integration work: standalone kernel, auditing, resource bridges, workspace/file/Git/GitHub plugins, trading research/paper platform, live-control boundary, autonomous teacher-student learning, SkillForge sandboxing, and production runtime wiring.
+`build-completion-v0.1` is the code-completion branch layered on top of `trading-core-v0.1`. It contains persistent paper recovery/evidence, the paper service runner, the explicit trusted broker boundary, local control/health API, provider-neutral voice/input routing, lifecycle hooks, documentation, and targeted regression tests.
 
-Before merging this milestone to `main`, run the full local regression suite and then run the Gemini/Ollama training workflow on the owner machine.
+After code freeze, pull this branch to the owner machine and run the full regression, recovery/failure-injection, paper-trading, and strategy validation phases before considering any live-broker implementation or live eligibility.
