@@ -9,12 +9,19 @@ from git_skill import GitSkill, GitSkillError, validate_branch_name, validate_co
 
 
 class GitPlugin:
-    """Kernel-native adapter around the reviewed allow-listed GitSkill."""
+    """Kernel-native adapter around the reviewed allow-listed GitSkill.
+
+    Validation prepares inert parameters. Mutable repository preconditions are
+    rechecked immediately before execution so a confirmed remote action cannot
+    silently rely on stale status/branch/conflict state.
+    """
+
+    MUTATING = frozenset({"stage", "commit", "create_branch", "switch_branch", "pull", "push"})
 
     def __init__(self) -> None:
         self.metadata = SkillMetadata(
             name="git",
-            version="0.2.0",
+            version="0.3.0",
             description="Safe Git operations scoped to the active workspace repository",
             operations=(
                 OperationSpec("status", "Inspect Git status", RiskTier.READ),
@@ -145,6 +152,9 @@ class GitPlugin:
     ) -> ExecutionResult:
         skill = GitSkill(Path(params["repo"]))
         try:
+            if operation in self.MUTATING:
+                self._runtime_guard(skill, operation, params)
+
             if operation == "status":
                 result = skill.status()
             elif operation == "branch":
@@ -181,6 +191,40 @@ class GitPlugin:
             data={"args": result.args, "stdout": result.stdout, "stderr": result.stderr},
             error=None if result.ok else (result.stderr or "Git command failed"),
         )
+
+    def _runtime_guard(self, skill: GitSkill, operation: str, params: Mapping[str, Any]) -> None:
+        if not skill.is_repository():
+            raise GitSkillError("repository is no longer available")
+
+        conflicts = skill.conflict_files()
+        if not conflicts.ok:
+            raise GitSkillError(conflicts.stderr or "failed to recheck Git conflicts")
+        if conflicts.stdout.strip():
+            raise GitSkillError("repository now has unresolved conflicts")
+
+        if operation == "stage":
+            return
+
+        status = skill.status()
+        if not status.ok:
+            raise GitSkillError(status.stderr or "failed to recheck Git status")
+
+        if operation == "commit":
+            staged = skill.diff(staged=True)
+            if not staged.ok:
+                raise GitSkillError(staged.stderr or "failed to recheck staged changes")
+            if not staged.stdout.strip():
+                raise GitSkillError("staged changes disappeared before commit")
+            return
+
+        if operation in {"create_branch", "switch_branch", "pull"} and self._working_tree_dirty(status.stdout):
+            raise GitSkillError("working tree changed and is no longer clean")
+
+        if operation in {"pull", "push"}:
+            current = skill.current_branch()
+            expected = str(params["branch"])
+            if not current.ok or current.stdout.strip() != expected:
+                raise GitSkillError("current branch changed after validation; submit the request again")
 
     @staticmethod
     def _repo(context: Mapping[str, Any]) -> Path:
