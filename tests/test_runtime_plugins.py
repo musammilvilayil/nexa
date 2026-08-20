@@ -12,6 +12,7 @@ if str(SRC_DIR) not in sys.path:
 from core import ContextBus
 from runtime import build_runtime
 from skills.file_skill import FileSkill
+from skills.github_skill import GitHubSkill
 from skills.workspace_skill import WorkspaceSkill
 from workspace import WorkspaceManager
 
@@ -96,7 +97,9 @@ class RuntimeBuilderTests(unittest.TestCase):
             self.assertIn("workspace", names)
             self.assertIn("files", names)
             self.assertIn("git", names)
+            self.assertIn("github", names)
             self.assertIn("trading", names)
+            self.assertIsInstance(runtime.github_skill, GitHubSkill)
             self.assertEqual(runtime.trading_skill.mandate.mode.value, "research")
             self.assertTrue(audit.exists())
 
