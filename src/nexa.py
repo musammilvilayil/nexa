@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -21,10 +22,12 @@ from memory import (
 from runtime import build_runtime
 from training import TradingCurriculum, TrainingStore
 
-MODEL = "qwen3:1.7b"
 MALAYALAM_RE = re.compile(r"[\u0D00-\u0D7F]")
 REPO_ROOT = Path(__file__).resolve().parents[1]
-TRAINING_DB = REPO_ROOT / "data" / "training.db"
+MODEL = os.getenv("OLLAMA_MODEL", "qwen3:1.7b").strip() or "qwen3:1.7b"
+TRAINING_DB = Path(
+    os.getenv("NEXA_TRAINING_DB", str(REPO_ROOT / "data" / "training.db"))
+).expanduser().resolve()
 
 SYSTEM_PROMPT = """
 You are NEXA, a local-first autonomous personal AI operating platform.
@@ -318,7 +321,6 @@ def main():
         if not user:
             continue
 
-        # Registered tool/plugin routing is always attempted before the LLM.
         response = runtime.kernel.process(user)
         if response.status != "no_match":
             reply = _kernel_reply(response)
