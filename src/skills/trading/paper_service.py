@@ -36,7 +36,8 @@ class PaperRuntimeService:
     mandate checks, sizing, and order approval remain inside ``TradingBrain`` and
     ``RiskEngine``. A provider failure is isolated to that symbol, reported as an
     error, and recorded in the paper evidence ledger as a safety/operational
-    violation. It is never converted into a synthetic market update.
+    violation when an evidence store is available. It is never converted into a
+    synthetic market update.
     """
 
     def __init__(
@@ -89,11 +90,19 @@ class PaperRuntimeService:
                         error=message,
                     )
                 )
-                if self.brain.paper_evidence_store is not None:
-                    self.brain.paper_evidence_store.record_safety_violation(
-                        datetime.now(timezone.utc).date(),
-                        f"{symbol}: {message}",
-                    )
+
+                # Evidence is observability, not part of the market-data control
+                # path. A missing optional evidence hook must never turn one feed
+                # failure into a second service failure or hide the original error.
+                evidence_store = getattr(self.brain, "paper_evidence_store", None)
+                if evidence_store is not None:
+                    try:
+                        evidence_store.record_safety_violation(
+                            datetime.now(timezone.utc).date(),
+                            f"{symbol}: {message}",
+                        )
+                    except Exception:
+                        pass
 
         return PaperServiceCycle(
             started_at_utc=started,
