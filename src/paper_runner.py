@@ -32,6 +32,11 @@ def _parse_args() -> argparse.Namespace:
         default=1,
         help="Number of cycles to run. Use 0 for a long-running local service.",
     )
+    parser.add_argument(
+        "--evidence-only",
+        action="store_true",
+        help="Print the active paper evidence session without arming execution.",
+    )
     return parser.parse_args()
 
 
@@ -56,8 +61,33 @@ def _print_cycle(cycle) -> None:
     print(json.dumps(payload, separators=(",", ":")))
 
 
+def _evidence_payload(runtime) -> dict:
+    report = runtime.trading_brain.paper_evidence()
+    if report is None:
+        return {"configured": False}
+    evidence = report.evidence
+    return {
+        "configured": True,
+        "session_id": report.session_id,
+        "started_at_utc": report.started_at_utc.isoformat(),
+        "consistent": report.consistent,
+        "reasons": report.reasons,
+        "trading_days": evidence.trading_days,
+        "closed_trades": evidence.closed_trades,
+        "net_pnl": evidence.net_pnl,
+        "max_drawdown_pct": evidence.max_drawdown_pct,
+        "safety_violations": evidence.safety_violations,
+    }
+
+
 def main() -> int:
     args = _parse_args()
+    runtime = build_runtime()
+
+    if args.evidence_only:
+        print(json.dumps({"paper_evidence": _evidence_payload(runtime)}, separators=(",", ":")))
+        return 0
+
     data_root = Path(args.data_root).expanduser().resolve()
     if not data_root.exists() or not data_root.is_dir():
         raise SystemExit(f"market data directory not found: {data_root}")
@@ -66,7 +96,6 @@ def main() -> int:
     if args.cycles < 0:
         raise SystemExit("--cycles cannot be negative")
 
-    runtime = build_runtime()
     provider = CSVMarketDataProvider(data_root)
     service = PaperRuntimeService(
         runtime.trading_brain,
@@ -95,7 +124,16 @@ def main() -> int:
     finally:
         service.stop()
 
-    print(json.dumps({"status": "stopped", "completed_cycles": completed}))
+    print(
+        json.dumps(
+            {
+                "status": "stopped",
+                "completed_cycles": completed,
+                "paper_evidence": _evidence_payload(runtime),
+            },
+            separators=(",", ":"),
+        )
+    )
     return 0
 
 
