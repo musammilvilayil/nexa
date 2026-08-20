@@ -189,7 +189,6 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
         promotion_store=promotion_store,
         live_arm=live_arm,
         kill_switch=kill_switch,
-        context_bus=context_bus,
         live_controller=live_controller,
     )
     registry.register(trading_control_skill)
