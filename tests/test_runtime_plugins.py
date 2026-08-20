@@ -82,12 +82,15 @@ class RuntimeBuilderTests(unittest.TestCase):
     def test_runtime_registers_kernel_plugins_and_defaults_to_research(self):
         with tempfile.TemporaryDirectory() as temp:
             audit = Path(temp) / "actions.db"
+            strategy_db = Path(temp) / "strategy.db"
             with patch.dict(
                 os.environ,
                 {
                     "NEXA_AUDIT_DB": str(audit),
+                    "NEXA_STRATEGY_DB": str(strategy_db),
                     "NEXA_TRADING_MODE": "research",
                     "NEXA_TRADING_SYMBOLS": "NIFTY50",
+                    "NEXA_TRADING_STRATEGIES": "adaptive_router_v1",
                 },
                 clear=False,
             ):
@@ -101,7 +104,11 @@ class RuntimeBuilderTests(unittest.TestCase):
             self.assertIn("trading", names)
             self.assertIsInstance(runtime.github_skill, GitHubSkill)
             self.assertEqual(runtime.trading_skill.mandate.mode.value, "research")
+            self.assertEqual(runtime.trading_brain.strategy.strategy_id, "adaptive_router_v1")
+            self.assertEqual(runtime.trading_brain.stage.value, "research")
+            self.assertEqual(runtime.trading_skill.mandate.allowed_strategies, ("adaptive_router_v1",))
             self.assertTrue(audit.exists())
+            self.assertTrue(strategy_db.exists())
 
 
 if __name__ == "__main__":
