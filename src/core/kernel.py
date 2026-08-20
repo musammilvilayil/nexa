@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping
@@ -42,9 +43,11 @@ class NexaKernel:
     later confirmation. It contains no capability-specific logic.
 
     Remote/destructive confirmations are short-lived. Confirmation executes the
-    exact validated parameters and context snapshot; user/model text is never
-    reparsed. Skills remain responsible for rechecking mutable external
-    preconditions immediately before side effects.
+    exact internally snapshotted validated parameters and context; user/model text
+    is never reparsed. Public PendingAction objects are defensive copies, so a
+    caller cannot mutate the internal action that will later execute. Skills remain
+    responsible for rechecking mutable external preconditions immediately before
+    side effects.
     """
 
     def __init__(
@@ -134,13 +137,33 @@ class NexaKernel:
             )
 
         if decision.outcome == PolicyOutcome.REQUIRE_CONFIRMATION:
+            try:
+                internal_params = copy.deepcopy(dict(validated))
+                internal_snapshot = copy.deepcopy(snapshot)
+            except Exception as exc:
+                audit_error = self._record_safely(
+                    action_id=action_id,
+                    skill_name=skill.metadata.name,
+                    operation=match.operation,
+                    params=validated,
+                    risk=spec.risk,
+                    status=AuditStatus.VALIDATION_FAILED,
+                    error=f"validated action is not snapshot-safe: {exc}",
+                )
+                suffix = f"; audit failed: {audit_error}" if audit_error else ""
+                return KernelResponse(
+                    status="error",
+                    message=f"Validated action cannot be safely snapshotted for confirmation.{suffix}",
+                    action_id=action_id,
+                )
+
             now = self._utc_now()
             action = PendingAction(
                 action_id=action_id,
                 skill_name=skill.metadata.name,
                 operation=match.operation,
-                params=dict(validated),
-                context=snapshot,
+                params=internal_params,
+                context=internal_snapshot,
                 risk=spec.risk,
                 created_at_utc=now,
                 expires_at_utc=now + timedelta(seconds=self.pending_ttl_seconds),
@@ -149,7 +172,7 @@ class NexaKernel:
                 action_id=action_id,
                 skill_name=skill.metadata.name,
                 operation=match.operation,
-                params=validated,
+                params=internal_params,
                 risk=spec.risk,
                 status=AuditStatus.PENDING,
             )
@@ -163,7 +186,7 @@ class NexaKernel:
             return KernelResponse(
                 status="confirmation_required",
                 message=decision.reason,
-                pending_action=action,
+                pending_action=self._public_pending(action),
                 action_id=action_id,
             )
 
@@ -278,7 +301,21 @@ class NexaKernel:
 
     def pending_actions(self) -> tuple[PendingAction, ...]:
         self._expire_pending()
-        return tuple(sorted(self._pending.values(), key=lambda item: item.created_at_utc))
+        ordered = sorted(self._pending.values(), key=lambda item: item.created_at_utc)
+        return tuple(self._public_pending(action) for action in ordered)
+
+    @staticmethod
+    def _public_pending(action: PendingAction) -> PendingAction:
+        return PendingAction(
+            action_id=action.action_id,
+            skill_name=action.skill_name,
+            operation=action.operation,
+            params=copy.deepcopy(dict(action.params)),
+            context=copy.deepcopy(action.context),
+            risk=action.risk,
+            created_at_utc=action.created_at_utc,
+            expires_at_utc=action.expires_at_utc,
+        )
 
     def _expire_pending(self) -> None:
         expired = [action for action in self._pending.values() if self._is_expired(action)]
