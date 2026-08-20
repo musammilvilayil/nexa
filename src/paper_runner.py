@@ -80,6 +80,16 @@ def _evidence_payload(runtime) -> dict:
     }
 
 
+def _print_error(message: str, *, code: str) -> None:
+    print(
+        json.dumps(
+            {"status": "blocked", "code": code, "message": message},
+            separators=(",", ":"),
+        ),
+        file=sys.stderr,
+    )
+
+
 def main() -> int:
     args = _parse_args()
     runtime = build_runtime()
@@ -104,8 +114,15 @@ def main() -> int:
     )
 
     # This is deliberately fail-closed. Research mode or an unpromoted strategy
-    # cannot be converted into autonomous paper execution by this CLI.
-    service.arm()
+    # cannot be converted into autonomous paper execution by this CLI. Expected
+    # safety denials are reported as a concise machine-readable block instead of
+    # leaking an implementation traceback to an operator/service wrapper.
+    try:
+        service.arm()
+    except (PermissionError, ValueError) as exc:
+        service.stop()
+        _print_error(str(exc), code="paper_arm_denied")
+        return 2
 
     def request_stop(*_args) -> None:
         service.stop()
