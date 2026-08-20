@@ -122,6 +122,16 @@ class KernelCoreTests(unittest.TestCase):
         self.assertEqual(skill.executions[0][1], {"target": "origin"})
         self.assertEqual(kernel.pending_actions(), ())
 
+    def test_mutating_public_pending_view_cannot_change_internal_request(self):
+        kernel, skill = self._kernel()
+
+        pending = kernel.process("publish origin")
+        pending.pending_action.params["target"] = "attacker-controlled"
+        confirmed = kernel.confirm(pending.pending_action.action_id)
+
+        self.assertEqual(confirmed.status, "success")
+        self.assertEqual(skill.executions[0][1], {"target": "origin"})
+
     def test_pending_action_cannot_be_confirmed_twice(self):
         kernel, _ = self._kernel()
 
