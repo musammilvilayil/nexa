@@ -16,6 +16,8 @@ class AuditStatus(str, Enum):
     FAILURE = "failure"
     DENIED = "denied"
     VALIDATION_FAILED = "validation_failed"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
 
 
 @dataclass(frozen=True)
@@ -54,8 +56,9 @@ class SQLiteAuditLedger:
     """Persistent action ledger for the standalone kernel.
 
     Rows are upserted by action_id so a pending/started action becomes a final
-    success or failure record without losing the original validated parameters.
-    Common secret-shaped keys are redacted before JSON serialization.
+    success, failure, cancellation, or expiry record without losing the original
+    validated parameters. Common secret-shaped keys are redacted before JSON
+    serialization.
     """
 
     DEFAULT_REDACT_FRAGMENTS = (
