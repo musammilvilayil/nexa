@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Callable
 from uuid import uuid4
 
+from sqlite_utils import connect_sqlite
+
 from .candidate_store import CandidateStore
 from .curriculum import CurriculumModule, TradingCurriculum
 from .engine import AutonomousTrainingEngine
@@ -50,9 +52,7 @@ class ImprovementBacklog:
             )
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path)
-        connection.row_factory = sqlite3.Row
-        return connection
+        return connect_sqlite(self.db_path)
 
     def enqueue(self, capability: str, *, risk_tier: str = "read", context: str = "") -> str:
         capability = capability.strip()
