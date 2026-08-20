@@ -34,8 +34,9 @@ class PaperRuntimeService:
 
     The service owns scheduling and market-data polling only. Strategy promotion,
     mandate checks, sizing, and order approval remain inside ``TradingBrain`` and
-    ``RiskEngine``. A provider failure is isolated to that symbol and is reported
-    as an error rather than converted into a synthetic market update.
+    ``RiskEngine``. A provider failure is isolated to that symbol, reported as an
+    error, and recorded in the paper evidence ledger as a safety/operational
+    violation. It is never converted into a synthetic market update.
     """
 
     def __init__(
@@ -80,13 +81,19 @@ class PaperRuntimeService:
                 result = self.brain.on_market_update(series)
                 results.append(PaperSymbolCycle(symbol=symbol, result=result))
             except Exception as exc:
+                message = f"{type(exc).__name__}: {exc}"
                 results.append(
                     PaperSymbolCycle(
                         symbol=symbol,
                         result=None,
-                        error=f"{type(exc).__name__}: {exc}",
+                        error=message,
                     )
                 )
+                if self.brain.paper_evidence_store is not None:
+                    self.brain.paper_evidence_store.record_safety_violation(
+                        datetime.now(timezone.utc).date(),
+                        f"{symbol}: {message}",
+                    )
 
         return PaperServiceCycle(
             started_at_utc=started,
