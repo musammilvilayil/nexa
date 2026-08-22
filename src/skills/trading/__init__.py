@@ -62,6 +62,7 @@ from .strategy import (
     MomentumConfig,
     StrategyDecision,
 )
+from .strategy_v2 import AdaptiveMomentumStrategyV2, MomentumV2Config
 from .validation import (
     EvaluationDecision,
     EvaluationThresholds,
@@ -72,6 +73,7 @@ from .validation import (
 
 __all__ = [
     "AdaptiveMomentumStrategy",
+    "AdaptiveMomentumStrategyV2",
     "AdaptiveStrategyRouter",
     "AutonomousPaperTrader",
     "BacktestEngine",
@@ -99,6 +101,7 @@ __all__ = [
     "MeanReversionConfig",
     "MeanReversionStrategy",
     "MomentumConfig",
+    "MomentumV2Config",
     "OrderStatus",
     "PaperBroker",
     "PaperCycleResult",
