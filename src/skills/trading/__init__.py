@@ -64,6 +64,7 @@ from .strategy import (
 )
 from .strategy_v2 import AdaptiveMomentumStrategyV2, MomentumV2Config
 from .strategy_v3 import AdaptiveMomentumStrategyV3, MomentumV3Config
+from .trend_pullback import TrendPullbackConfig, TrendPullbackStrategy
 from .validation import (
     EvaluationDecision,
     EvaluationThresholds,
@@ -146,6 +147,8 @@ __all__ = [
     "TradingMode",
     "TradingResearchPipeline",
     "TradingSkill",
+    "TrendPullbackConfig",
+    "TrendPullbackStrategy",
     "TrustedBrokerFactory",
     "WalkForwardSplitter",
     "WalkForwardWindow",
