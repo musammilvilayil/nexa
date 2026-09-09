@@ -76,10 +76,23 @@ class RuntimeControlPlane:
                 "safety_violations": evidence.evidence.safety_violations,
             }
 
+        capabilities_info = []
+        if getattr(self.runtime, "capability_store", None) is not None:
+            for rec in self.runtime.capability_store.list_capabilities():
+                capabilities_info.append({
+                    "id": rec.spec.capability_id,
+                    "name": rec.spec.name,
+                    "version": rec.spec.version,
+                    "risk": rec.spec.risk_tier.value,
+                    "usage_count": rec.usage_count,
+                    "last_used_at_utc": rec.last_used_at_utc,
+                })
+
         return {
             "state": "stopped" if self._stopped else "ready",
             "started_at_utc": self._started_at_utc.isoformat(),
             "skills": [item.name for item in self.runtime.registry.list_metadata()],
+            "capabilities": capabilities_info,
             "trading": {
                 "mode": brain.mandate.mode.value,
                 "strategy_id": brain.strategy.strategy_id,

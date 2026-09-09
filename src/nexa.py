@@ -195,14 +195,53 @@ def _skills_reply(runtime) -> str:
         lines.append(f"- {metadata.name} v{metadata.version}: {metadata.description}")
         for operation in metadata.operations:
             lines.append(f"  - {operation.name} [{operation.risk.value}]")
+
+    if getattr(runtime, "capability_store", None) is not None:
+        caps = runtime.capability_store.list_capabilities()
+        if caps:
+            lines.append("\nDynamically Acquired Capabilities:")
+            for cap in caps:
+                lines.append(
+                    f"- {cap.spec.capability_id} ({cap.spec.name} v{cap.spec.version}) "
+                    f"[{cap.spec.risk_tier.value}] - used {cap.usage_count} times"
+                )
+
     lines.extend(
         [
-            "Built-in services:",
+            "\nBuilt-in services:",
             "- Personal Memory [active]",
             "- Teacher-Student Language Layer [active]",
             "- Gemini/Ollama training bridges [available when configured]",
+            "- Self-Extending Capability Forge [active]",
         ]
     )
+    return "\n".join(lines)
+
+
+def _capabilities_reply(runtime) -> str:
+    if getattr(runtime, "capability_store", None) is None:
+        return "Capability subsystem not initialized."
+    store = runtime.capability_store
+    caps = store.list_capabilities()
+    events = store.get_events(limit=10)
+
+    lines = ["NEXA Capability Registry:"]
+    if not caps:
+        lines.append("No dynamic capabilities acquired yet.")
+    else:
+        for cap in caps:
+            lines.append(
+                f"- ID: {cap.spec.capability_id} | Name: {cap.spec.name} v{cap.spec.version} "
+                f"| Risk: {cap.spec.risk_tier.value} | Used: {cap.usage_count}x"
+            )
+            lines.append(f"  Purpose: {cap.spec.purpose}")
+            lines.append(f"  Path: {cap.module_path}")
+
+    if events:
+        lines.append("\nRecent Capability Observability Events:")
+        for evt in events:
+            lines.append(f"[{evt.event_type.value}] {evt.capability_id}: {evt.message}")
+
     return "\n".join(lines)
 
 
@@ -281,8 +320,8 @@ def main():
     messages.extend(load_recent_messages(limit=12))
 
     print(
-        "NEXA ONLINE - Kernel + Memory + Teacher-Student + Workspace/File/Git/GitHub/Trading enabled.\n"
-        "Commands: /skills, /pending, /confirm <id>, /cancel <id>, /teacher-stats, /training-status, /exit.\n"
+        "NEXA ONLINE - Kernel + Memory + Teacher-Student + Workspace/File/Git/GitHub/Trading/Capabilities enabled.\n"
+        "Commands: /skills, /capabilities, /pending, /confirm <id>, /cancel <id>, /teacher-stats, /training-status, /exit.\n"
     )
 
     while True:
@@ -300,6 +339,9 @@ def main():
             continue
         if lowered == "/skills":
             print(f"\nNEXA: {_skills_reply(runtime)}\n")
+            continue
+        if lowered == "/capabilities":
+            print(f"\nNEXA: {_capabilities_reply(runtime)}\n")
             continue
         if lowered == "/pending":
             print(f"\nNEXA: {_pending_reply(runtime)}\n")

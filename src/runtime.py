@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from core import ContextBus, NexaKernel, SQLiteAuditLedger, SkillRegistry
+from capabilities import CapabilityManager, CapabilityStore
 from skills.file_skill import FileSkill
 from skills.git_plugin import GitPlugin
 from skills.github_skill import GitHubSkill
@@ -50,6 +51,8 @@ class NexaRuntime:
     live_arm: LiveArmController
     kill_switch: TradingKillSwitch
     live_controller: LiveExecutionController | None
+    capability_manager: CapabilityManager | None = None
+    capability_store: CapabilityStore | None = None
 
 
 def _workspace_roots() -> tuple[Path, ...]:
@@ -212,6 +215,20 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
     )
     registry.register(trading_control_skill)
 
+    capability_db_path = Path(
+        os.getenv("NEXA_CAPABILITY_DB", str(PROJECT_ROOT / "data" / "capabilities.db"))
+    ).expanduser().resolve()
+    capability_store = CapabilityStore(capability_db_path)
+    capability_storage_dir = Path(
+        os.getenv("NEXA_CAPABILITIES_DIR", str(PROJECT_ROOT / "data" / "capabilities"))
+    ).expanduser().resolve()
+    capability_manager = CapabilityManager(
+        store=capability_store,
+        storage_dir=capability_storage_dir,
+    )
+    # Load all previously persisted capabilities into the registry
+    capability_manager.load_all_into_registry(registry)
+
     audit_path = Path(
         os.getenv("NEXA_AUDIT_DB", str(PROJECT_ROOT / "data" / "actions.db"))
     ).expanduser().resolve()
@@ -220,6 +237,7 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
         registry=registry,
         context_bus=context_bus,
         audit_ledger=audit,
+        capability_manager=capability_manager,
         pending_ttl_seconds=_float_env("NEXA_PENDING_TTL_SECONDS", 300.0),
     )
 
@@ -230,6 +248,7 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
     context_bus.set_environment_flag("live_broker_configured", live_broker is not None)
     context_bus.set_environment_flag("paper_state_persistent", True)
     context_bus.set_environment_flag("paper_evidence_persistent", True)
+    context_bus.set_environment_flag("capabilities_persistent", True)
 
     return NexaRuntime(
         kernel=kernel,
@@ -246,6 +265,8 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
         live_arm=live_arm,
         kill_switch=kill_switch,
         live_controller=live_controller,
+        capability_manager=capability_manager,
+        capability_store=capability_store,
     )
 
 

@@ -57,6 +57,7 @@ class NexaKernel:
         security_gate: SecurityGate | None = None,
         dispatcher: Dispatcher | None = None,
         audit_ledger: AuditLedger | None = None,
+        capability_manager: Any | None = None,
         *,
         pending_ttl_seconds: float = 300.0,
         clock: Callable[[], datetime] | None = None,
@@ -68,6 +69,7 @@ class NexaKernel:
         self.security_gate = security_gate or SecurityGate()
         self.dispatcher = dispatcher or Dispatcher()
         self.audit_ledger = audit_ledger
+        self.capability_manager = capability_manager
         self.pending_ttl_seconds = float(pending_ttl_seconds)
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._pending: dict[str, PendingAction] = {}
@@ -77,6 +79,12 @@ class NexaKernel:
         snapshot = self.context_bus.snapshot()
         context = snapshot.as_mapping()
         match = self.registry.resolve(text, context)
+
+        if match is None and self.capability_manager is not None:
+            # Self-extending capability check: detect gap, build, test, register, persist
+            new_skill = self.capability_manager.handle_gap(text, context, self.registry)
+            if new_skill is not None:
+                match = self.registry.resolve(text, context)
 
         if match is None:
             return KernelResponse(
@@ -419,6 +427,16 @@ class NexaKernel:
             )
 
         status = "success" if result.success else "failure"
+        if self.capability_manager is not None:
+            try:
+                self.capability_manager.record_execution(
+                    skill_name,
+                    success=result.success,
+                    error=result.error,
+                )
+            except Exception:
+                pass
+
         return KernelResponse(
             status=status,
             message=result.message,
