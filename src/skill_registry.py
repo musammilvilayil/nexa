@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from agent_core import AgentCore
+
 
 @dataclass(frozen=True)
 class SkillInfo:
@@ -47,13 +49,19 @@ INSTALLED_SKILLS = (
             "main branchilek switch cheyyu",
         ),
     ),
+    SkillInfo(
+        key="agent-core",
+        name="Agent Core v1",
+        status="active",
+        description="Structured understand-plan-tool-verify orchestration with an explicit tool allowlist and confirmation gate for mutations.",
+        commands=("/agent tools", "/agent plan <goal>"),
+    ),
 )
 
 
 # Accept the correct spelling (`skill`/`skills`) and the common user typo
 # (`skil`/`skils`) so the deterministic registry still catches the request.
 SKILL_WORD = r"(?:skills?|skils?)"
-
 SKILL_LIST_PATTERNS = (
     re.compile(r"^/skills$", re.IGNORECASE),
     re.compile(rf"^{SKILL_WORD}\s+list(?:\s+cheyyu|\s+cheythe|\s+cheyyamo)?$", re.IGNORECASE),
@@ -82,7 +90,33 @@ def render_skill_list() -> str:
     return "\n".join(lines)
 
 
+_AGENT = AgentCore()
+
+
+def handle_agent_command(text: str) -> str | None:
+    normalized = text.strip()
+    lower = normalized.lower()
+
+    if lower in {"/agent tools", "agent tools", "agent core tools"}:
+        return _AGENT.describe()
+
+    match = re.match(r"^/agent\s+plan\s+(.+)$", normalized, flags=re.IGNORECASE)
+    if match:
+        plan = _AGENT.plan(match.group(1))
+        lines = [f"Agent plan for: {plan.task.goal}"]
+        for index, step in enumerate(plan.steps, start=1):
+            suffix = f" -> {step.tool}" if step.tool else ""
+            gate = " [confirmation required]" if step.mutating else ""
+            lines.append(f"{index}. {step.kind.value}: {step.description}{suffix}{gate}")
+        return "\n".join(lines)
+
+    return None
+
+
 def handle_skill_command(text: str) -> str | None:
+    agent_reply = handle_agent_command(text)
+    if agent_reply is not None:
+        return agent_reply
     if is_skill_list_request(text):
         return render_skill_list()
     return None
