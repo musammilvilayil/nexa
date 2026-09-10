@@ -39,11 +39,17 @@ class CapabilityValidator(ast.NodeVisitor):
         "winreg",
         "pty",
         "fcntl",
+        "subprocess",
+        "keyring",
     }
 
     FORBIDDEN_ATTRIBUTES = {
         "popen",
         "system",
+        "failsafe",
+        "security_gate",
+        "audit_ledger",
+        "_deny_patterns",
     }
 
     ALLOWED_CORE_SYMBOLS = {
@@ -169,6 +175,34 @@ class CapabilityValidator(ast.NodeVisitor):
                         f"Accessing attribute '{node.func.attr}' is forbidden",
                     )
                 )
+            if node.func.attr == "getenv" and node.args:
+                arg0 = node.args[0]
+                if isinstance(arg0, ast.Constant) and isinstance(arg0.value, str):
+                    val_upper = arg0.value.upper()
+                    if any(s in val_upper for s in ("KEY", "SECRET", "PASSWORD", "TOKEN", "CREDENTIAL")):
+                        self._findings.append(
+                            CapabilityValidationFinding(
+                                node.lineno,
+                                "forbidden_secret_access",
+                                f"Accessing environment secret '{arg0.value}' is forbidden in dynamic skills",
+                            )
+                        )
+        self.generic_visit(node)
+
+    def visit_Subscript(self, node: ast.Subscript) -> None:
+        # Check os.environ['...KEY...']
+        if isinstance(node.value, ast.Attribute) and node.value.attr == "environ":
+            slice_node = node.slice
+            if isinstance(slice_node, ast.Constant) and isinstance(slice_node.value, str):
+                val_upper = slice_node.value.upper()
+                if any(s in val_upper for s in ("KEY", "SECRET", "PASSWORD", "TOKEN", "CREDENTIAL")):
+                    self._findings.append(
+                        CapabilityValidationFinding(
+                            node.lineno,
+                            "forbidden_secret_access",
+                            f"Accessing environment secret '{slice_node.value}' is forbidden in dynamic skills",
+                        )
+                    )
         self.generic_visit(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:

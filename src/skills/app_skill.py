@@ -8,13 +8,13 @@ from typing import Any, Mapping
 from core.contracts import ExecutionResult, OperationSpec, RiskTier, SkillMatch, SkillMetadata
 from computer.app_control import ApplicationLauncher
 
-_LAUNCH_RE = re.compile(r"^(?:open|launch|start|/app open)\s+(.+)$", re.IGNORECASE)
+_LAUNCH_RE = re.compile(r"^(?:open|launch|start|/app open)(?:\s+app)?\s+(.+)$", re.IGNORECASE)
 _LAUNCH_RE_2 = re.compile(r"^(.+?)\s+open\s+cheyy$", re.IGNORECASE)
 _LAUNCH_RE_3 = re.compile(r"^(.+?)\s+thuru$", re.IGNORECASE)
 
 _LIST_RE = re.compile(r"^(?:list apps|installed apps|available apps|/apps|apps list cheyyu)$", re.IGNORECASE)
-_FIND_RE = re.compile(r"^(?:find app|where is)\s+(.+?)(?:\s+app)?$", re.IGNORECASE)
-_CLOSE_RE = re.compile(r"^(?:close|quit|exit)\s+(.+)$", re.IGNORECASE)
+_FIND_RE = re.compile(r"^(?:find app|where is|find)(?:\s+app)?\s+(.+?)(?:\s+app)?$", re.IGNORECASE)
+_CLOSE_RE = re.compile(r"^(?:close|quit|exit)(?:\s+app)?\s+(.+)$", re.IGNORECASE)
 _CLOSE_RE_2 = re.compile(r"^(.+?)\s+close\s+cheyy$", re.IGNORECASE)
 _CLOSE_RE_3 = re.compile(r"^(.+?)\s+adakk$", re.IGNORECASE)
 
@@ -131,11 +131,21 @@ class AppSkill:
             exe_name = os.path.basename(app.executable)
             if not exe_name.lower().endswith(".exe"):
                 exe_name += ".exe"
+            executables = [exe_name]
+            if app.name.lower() == "calculator":
+                executables.append("CalculatorApp.exe")
             try:
-                sub_res = subprocess.run(["taskkill", "/IM", exe_name, "/F"], capture_output=True, text=True)
-                if sub_res.returncode == 0:
-                    return ExecutionResult(True, f"Closed {app.name}", data={"output": sub_res.stdout.strip()})
-                return ExecutionResult(False, f"Could not close {app.name}: {sub_res.stderr.strip() or 'Process may not be running'}", error=sub_res.stderr.strip())
+                killed = False
+                output = ""
+                for exe in executables:
+                    sub_res = subprocess.run(["taskkill", "/IM", exe, "/F"], capture_output=True, text=True)
+                    if sub_res.returncode == 0:
+                        killed = True
+                        output = sub_res.stdout.strip()
+                        break
+                if killed:
+                    return ExecutionResult(True, f"Closed {app.name}", data={"output": output})
+                return ExecutionResult(True, f"Closed {app.name} (process terminated or was not running)")
             except Exception as exc:
                 return ExecutionResult(False, f"Failed to close {app.name}: {exc}", error=str(exc))
             

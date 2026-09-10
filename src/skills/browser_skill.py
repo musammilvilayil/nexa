@@ -46,6 +46,9 @@ _LAUNCH_RE = re.compile(
     re.IGNORECASE
 )
 
+# download: `download <url>`, `browser download <url>`
+_DOWNLOAD_RE = re.compile(r"^(?:download\s+(\S+)|browser\s+download\s+(\S+))$", re.IGNORECASE)
+
 # close_browser: `close browser`, `browser close cheyy`
 _CLOSE_RE = re.compile(r"^(?:close\s+browser|browser\s+close\s+cheyy)$", re.IGNORECASE)
 
@@ -113,6 +116,11 @@ class BrowserSkill:
             tab_id = match.group(1)
             return SkillMatch("browser", "tab_close", {"tab_id": tab_id if tab_id else "current"})
             
+        match = _DOWNLOAD_RE.fullmatch(normalized)
+        if match:
+            url = next(g for g in match.groups() if g is not None).strip()
+            return SkillMatch("browser", "download", {"url": url})
+
         if _LAUNCH_RE.fullmatch(normalized):
             return SkillMatch("browser", "launch")
             
@@ -166,7 +174,13 @@ class BrowserSkill:
                     raise ValueError("Invalid tab ID")
             return {"tab_id": tab_id}
             
-        if operation in ("extract", "screenshot", "tab_list", "launch", "close_browser", "download"):
+        if operation == "download":
+            url = str(params.get("url", "")).strip()
+            if not url:
+                raise ValueError("URL cannot be empty")
+            return {"url": url}
+
+        if operation in ("extract", "screenshot", "tab_list", "launch", "close_browser"):
             return {}
             
         raise ValueError("Unknown browser operation")
@@ -191,7 +205,7 @@ class BrowserSkill:
                 return ExecutionResult(success=result.success, message=result.message, error=result.error)
                 
             # Requires launched browser - auto-launch on demand if available
-            if not self.engine.is_launched and operation not in ("launch", "close_browser"):
+            if not self.engine.is_launched and operation not in ("launch", "close_browser", "download"):
                 launch_res = self.engine.launch()
                 if not launch_res.success:
                     return ExecutionResult(False, f"Browser is not launched: {launch_res.error or launch_res.message}", error=launch_res.error)
@@ -245,6 +259,22 @@ class BrowserSkill:
                     result = self.engine.close_tab(tab_id)
                     return ExecutionResult(success=result.success, message=result.message, error=result.error)
                     
+            if operation == "download":
+                url = params.get("url", "")
+                if not url:
+                    return ExecutionResult(False, "No URL specified for download", error="missing url")
+                try:
+                    import httpx
+                    resp = httpx.get(url, timeout=30.0, follow_redirects=True)
+                    resp.raise_for_status()
+                    return ExecutionResult(
+                        True,
+                        f"Successfully downloaded {len(resp.content)} bytes from {url}",
+                        data={"url": url, "size_bytes": len(resp.content)},
+                    )
+                except Exception as exc:
+                    return ExecutionResult(False, f"Download failed: {exc}", error=str(exc))
+
             return ExecutionResult(False, f"Unsupported operation: {operation}", error="unsupported operation")
             
         except Exception as e:

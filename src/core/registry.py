@@ -59,3 +59,12 @@ class SkillRegistry:
 
         candidates.sort(key=lambda item: (-item[1].confidence, item[0]))
         return candidates[0][1]
+
+    def unregister(self, name: str) -> bool:
+        """Unregister a skill from the registry (used during rollback)."""
+        if name in self._skills:
+            del self._skills[name]
+            if name in self._order:
+                self._order.remove(name)
+            return True
+        return False

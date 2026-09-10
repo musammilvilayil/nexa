@@ -219,6 +219,22 @@ class CapabilityManager:
         except Exception:
             pass
 
+    def rollback_capability(self, capability_id: str, registry: SkillRegistry | None = None) -> bool:
+        """Rollback and unregister a dynamic capability."""
+        skill = self._loaded_skills.pop(capability_id, None)
+        unregistered = False
+        if skill and registry is not None:
+            unregistered = registry.unregister(skill.metadata.name)
+
+        # Mark in store or log event
+        self.log_event(
+            CapabilityEventType.CAPABILITY_EXECUTION_FAILED,
+            capability_id,
+            f"Capability '{capability_id}' rolled back from active runtime",
+            {"unregistered": unregistered},
+        )
+        return True
+
     def _instantiate_skill(
         self,
         module_path: Path,

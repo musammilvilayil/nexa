@@ -20,8 +20,8 @@ _NL_WRITE_FOLDER_FILE_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _NL_WRITE_FILE_RE = re.compile(
-    r"^(?:create\s+(?:a\s+)?file\s+(?:called\s+)?(\S+)\s+(?:with|containing)\s+(.*)|"
-    r"write\s+(?:to\s+)?(\S+)\s*[:=]\s*(.*))$",
+    r"^(?:create\s+(?:a\s+)?file\s+(?:called\s+)?(\S+)\s+(?:with|containing|content)\s+(.*)|"
+    r"write\s+(?:file\s+)?(?:to\s+)?(\S+)\s*(?:[:=]|content\s+)\s*(.*))$",
     re.IGNORECASE | re.DOTALL,
 )
 _MANGLISH_CREATE_FILE_RE = re.compile(
@@ -47,6 +47,7 @@ class FileSkill:
                 OperationSpec("list", "List files under a workspace-relative directory", RiskTier.READ),
                 OperationSpec("write", "Create or replace a UTF-8 file", RiskTier.MUTATE),
                 OperationSpec("patch", "Replace one exact text occurrence", RiskTier.MUTATE),
+                OperationSpec("mkdir", "Create a directory in the workspace", RiskTier.MUTATE),
             ),
         )
 
@@ -80,6 +81,16 @@ class FileSkill:
             return SkillMatch("files", "write", {"path": path, "content": content})
         if _MANGLISH_CREATE_FILE_RE.fullmatch(normalized):
             return SkillMatch("files", "write", {"path": "test.txt", "content": "Hello from NEXA"})
+
+        mkdir_match = re.fullmatch(
+            r"^(?:create\s+(?:a\s+)?(?:directory|folder)\s+(\S+)|mkdir\s+(\S+)|/file\s+mkdir\s+(\S+))$",
+            normalized,
+            re.IGNORECASE,
+        )
+        if mkdir_match:
+            dpath = next(g for g in mkdir_match.groups() if g is not None).strip()
+            return SkillMatch("files", "mkdir", {"path": dpath})
+
         return None
 
     def validate(
@@ -101,6 +112,9 @@ class FileSkill:
             if len(content.encode("utf-8")) > self.max_write_bytes:
                 raise ValueError("file content exceeds write limit")
             return {"root": root, "path": path, "content": content}
+        if operation == "mkdir":
+            path = self._resolve(root, str(params.get("path", "")), allow_root=False)
+            return {"root": root, "path": path}
         if operation == "patch":
             path = self._resolve(root, str(params.get("path", "")))
             old = str(params.get("old", ""))
@@ -157,6 +171,10 @@ class FileSkill:
             path.write_text(str(params["content"]), encoding="utf-8")
             return ExecutionResult(True, f"Wrote {path.relative_to(root).as_posix()}")
 
+        if operation == "mkdir":
+            path.mkdir(parents=True, exist_ok=True)
+            return ExecutionResult(True, f"Created directory {path.relative_to(root).as_posix()}", data={"path": str(path)})
+
         if operation == "patch":
             if not path.exists() or not path.is_file():
                 return ExecutionResult(False, "file not found", error="file not found")
@@ -194,10 +212,13 @@ class FileSkill:
         value = raw.strip()
         if not value:
             raise ValueError("file path required")
-        relative = Path(value)
-        if relative.is_absolute() or ".." in relative.parts or "\x00" in value:
+        candidate = Path(value)
+        if "\x00" in value or ".." in candidate.parts:
             raise ValueError("path must stay inside active workspace")
-        target = (root / relative).resolve()
+        if candidate.is_absolute():
+            target = candidate.resolve()
+        else:
+            target = (root / candidate).resolve()
         if not target.is_relative_to(root):
             raise ValueError("path escaped active workspace")
         if not allow_root and target == root:

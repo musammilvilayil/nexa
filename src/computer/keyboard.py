@@ -19,6 +19,11 @@ class KeyboardController:
     def _get_controller(self):
         if self._controller is None:
             try:
+                try:
+                    from computer.win32_desktop import ensure_desktop_attached
+                    ensure_desktop_attached()
+                except Exception:
+                    pass
                 from pynput import keyboard
                 self._pynput_keyboard = keyboard
                 self._controller = keyboard.Controller()

@@ -406,6 +406,73 @@ def main():
             save_message("user", user)
             _record_reply(messages, user, reply)
             continue
+        if lowered == "/desktop-check":
+            from computer.diagnostics import run_desktop_check, format_desktop_check
+            rep = run_desktop_check(failsafe=runtime.failsafe)
+            print(f"\n{format_desktop_check(rep)}\n")
+            continue
+        if lowered == "/voice-status":
+            from voice.diagnostics import get_voice_status, format_voice_status
+            v_stat = get_voice_status()
+            print(f"\n{format_voice_status(v_stat)}\n")
+            continue
+        if lowered == "/tasks":
+            if getattr(runtime, "task_store", None) is not None:
+                tasks = runtime.task_store.list_tasks(limit=10)
+                if not tasks:
+                    print("\nNEXA: No task history recorded yet.\n")
+                else:
+                    print("\nNEXA Task History:")
+                    for t in tasks:
+                        print(f"- Task {t.task_id[:8]} [{t.state.upper()}]: {t.goal} (steps: {len(t.plan.steps)}, recoveries: {t.recovery_count})")
+                    print()
+            else:
+                print("\nNEXA: Task persistence store not initialized.\n")
+            continue
+        if lowered == "/memory":
+            lines = ["NEXA Memory Status:"]
+            for key in ["name", "favourite_color", "user_mandate", "project_goal"]:
+                val = get_fact(key)
+                if val is not None:
+                    lines.append(f"  - {key}: {val}")
+            recent = load_recent_messages(limit=5)
+            lines.append(f"  Recent interactions stored: {len(recent)} messages")
+            print("\nNEXA: " + "\n".join(lines) + "\n")
+            continue
+        if lowered == "/permissions":
+            lines = [
+                "NEXA Permissions & Security Boundaries:",
+                f"  Workspace roots: {', '.join(str(r) for r in _workspace_roots())}",
+            ]
+            if runtime.security_gate:
+                lines.append(f"  Deny patterns: {len(runtime.security_gate._deny_patterns)} active rules")
+            lines.extend([
+                "  Risk Tiers:",
+                "    - READ: Autonomous read-only access",
+                "    - MUTATE: Autonomous local filesystem/app changes",
+                "    - REMOTE: External network/web interaction",
+                "    - CRITICAL: Interactive confirmation required",
+                "    - DESTRUCTIVE: Forbidden or confirmed execution",
+            ])
+            print("\nNEXA: " + "\n".join(lines) + "\n")
+            continue
+        if lowered.startswith("/plan "):
+            plan_query = user.split(maxsplit=1)[1].strip()
+            if runtime.task_planner is not None:
+                plan = runtime.task_planner.plan(plan_query)
+                print(f"\nNEXA Planned Workflow: '{plan_query}'")
+                print(f"  Plan ID: {plan.plan_id}")
+                for s in plan.steps:
+                    print(f"  Step {s.step_id}: [{s.skill_name}.{s.operation}] {s.description}")
+                print()
+            else:
+                print("\nNEXA: TaskPlanner not configured.\n")
+            continue
+        if lowered == "/stop":
+            if runtime.failsafe is not None:
+                runtime.failsafe.stop()
+            print("\nNEXA: EMERGENCY STOP TRIGGERED. All computer-use actions halted.\n")
+            continue
         if not user:
             continue
 
@@ -415,6 +482,16 @@ def main():
             save_message("user", user)
             _record_reply(messages, user, reply)
             continue
+
+        # Multi-step task planning before conversational fallback
+        if runtime.task_planner is not None and runtime.plan_executor is not None:
+            task_plan = runtime.task_planner.plan(user)
+            if len(task_plan.steps) > 1 or (len(task_plan.steps) == 1 and task_plan.steps[0].skill_name != "unknown"):
+                plan_res = runtime.plan_executor.execute(task_plan)
+                reply = plan_res.message
+                save_message("user", user)
+                _record_reply(messages, user, reply)
+                continue
 
         save_message("user", user)
 

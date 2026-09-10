@@ -10,6 +10,7 @@ class PlanStatus(str, Enum):
     FAILED = "failed"
     PARTIALLY_COMPLETED = "partially_completed"
     ROLLED_BACK = "rolled_back"
+    CANCELLED = "cancelled"
 
 class StepStatus(str, Enum):
     PENDING = "pending"
@@ -18,6 +19,7 @@ class StepStatus(str, Enum):
     FAILED = "failed"
     SKIPPED = "skipped"
     ROLLED_BACK = "rolled_back"
+    CANCELLED = "cancelled"
 
 @dataclass
 class PlanStep:
@@ -58,3 +60,19 @@ class PlanResult:
     completed_steps: int = 0
     total_steps: int = 0
     errors: tuple[str, ...] = ()
+
+@dataclass
+class TaskRecord:
+    """Complete metadata and state record for a tracked task."""
+    task_id: str
+    goal: str
+    plan: TaskPlan
+    current_step: int = 0
+    state: str = "pending"
+    risk: str = "mutate"
+    started_at: str = ""
+    updated_at: str = ""
+    attempt_count: int = 1
+    verification_result: str = ""
+    failure_reason: str | None = None
+    recovery_count: int = 0

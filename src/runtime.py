@@ -69,6 +69,7 @@ class NexaRuntime:
     app_skill: AppSkill | None = None
     task_planner: Any | None = None
     plan_executor: Any | None = None
+    task_store: Any | None = None
 
 
 def _workspace_roots() -> tuple[Path, ...]:
@@ -335,9 +336,15 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
 
     from planner.task_planner import TaskPlanner
     from planner.executor import PlanExecutor
+    from planner.task_store import TaskStore
+
+    tasks_db_path = Path(
+        os.getenv("NEXA_TASKS_DB", str(PROJECT_ROOT / "data" / "tasks.db"))
+    ).expanduser().resolve()
+    task_store = TaskStore(tasks_db_path)
 
     task_planner = TaskPlanner(registry=registry, capability_manager=capability_manager)
-    plan_executor = PlanExecutor(kernel_process=kernel.process)
+    plan_executor = PlanExecutor(kernel_process=kernel.process, task_store=task_store)
 
     return NexaRuntime(
         kernel=kernel,
@@ -365,6 +372,7 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
         app_skill=app_skill,
         task_planner=task_planner,
         plan_executor=plan_executor,
+        task_store=task_store,
     )
 
 

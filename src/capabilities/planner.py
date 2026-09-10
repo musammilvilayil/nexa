@@ -22,7 +22,7 @@ class CapabilityPlanner:
     )
 
     ZIP_CREATE_RE = re.compile(
-        r"^(?:(?:please\s+)?(?:create\s+zip|zip|compress)\s+['\"]?([^'\"\s]+)['\"]?\s+(?:into|as|to)\s+['\"]?([^'\"\s]+\.zip)['\"]?|"
+        r"^(?:(?:please\s+)?(?:create\s+zip|zip|compress)(?:\s+(?:directory|folder|file))?\s+['\"]?([^'\"\s]+)['\"]?\s+(?:into|as|to)\s+['\"]?([^'\"\s]+\.zip)['\"]?|"
         r"(?:/zip\s+create\s+['\"]?([^'\"\s]+)['\"]?\s+['\"]?([^'\"\s]+)['\"]?))$",
         re.IGNORECASE,
     )
@@ -81,7 +81,7 @@ class CapabilityPlanner:
 
         # Check ZIP creation
         match = self.ZIP_CREATE_RE.search(clean)
-        if match or ("create zip" in clean.lower() or "zip folder" in clean.lower()):
+        if match or ("create zip" in clean.lower() or "zip folder" in clean.lower() or "zip directory" in clean.lower() or "zip " in clean.lower()):
             source = ""
             archive = ""
             if match:
@@ -91,6 +91,14 @@ class CapabilityPlanner:
                 elif len(groups) == 1:
                     archive = groups[0]
 
+            if not archive:
+                words = clean.split()
+                for w in words:
+                    cleaned_w = w.strip("'\",;:")
+                    if cleaned_w.lower().endswith(".zip"):
+                        archive = cleaned_w
+                        break
+
             return CapabilityPlan(
                 capability_id="file.zip.create",
                 name="zip_create",
@@ -98,7 +106,7 @@ class CapabilityPlanner:
                 purpose="Safely compresses files/directories into a ZIP file within workspace",
                 operation="create",
                 risk_tier=RiskTier.MUTATE,
-                intents=("create zip", "zip file", "compress zip", "/zip create"),
+                intents=("create zip", "zip file", "compress zip", "/zip create", "zip directory", "zip"),
                 dependencies=("zipfile", "pathlib"),
                 extracted_params={
                     "source_path": source or ".",

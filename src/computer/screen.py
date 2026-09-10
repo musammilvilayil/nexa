@@ -13,6 +13,11 @@ class ScreenCapture:
     def _get_mss(self):
         if self._mss is None:
             try:
+                try:
+                    from computer.win32_desktop import ensure_desktop_attached
+                    ensure_desktop_attached()
+                except Exception:
+                    pass
                 import mss
                 self._mss = mss.mss()
             except ImportError:
@@ -34,6 +39,11 @@ class ScreenCapture:
             monitor_idx = 1
             
         try:
+            try:
+                from computer.win32_desktop import ensure_desktop_attached
+                ensure_desktop_attached()
+            except Exception:
+                pass
             sct_img = sct.grab(sct.monitors[monitor_idx])
             try:
                 import mss.tools

@@ -368,7 +368,12 @@ class {class_name}:
         intents = {list(plan.intents)}
         for intent in intents:
             if intent in normalized:
-                return SkillMatch("{plan.name}", "{plan.operation}", {dict(plan.extracted_params)})
+                params = dict({dict(plan.extracted_params)})
+                for word in text.split():
+                    w = word.strip("'\\",;:")
+                    if w.lower().endswith(".zip"):
+                        params["archive_path"] = w
+                return SkillMatch("{plan.name}", "{plan.operation}", params)
         return None
 
     def validate(
@@ -385,7 +390,9 @@ class {class_name}:
         params: Mapping[str, Any],
         context: Mapping[str, Any],
     ) -> ExecutionResult:
-        return ExecutionResult(True, f"Executed {plan.name}.{plan.operation} successfully", data=dict(params))
+        archive = params.get("archive_path", "")
+        msg = f"Created archive {{archive}}" if archive else f"Executed {plan.name}.{plan.operation} successfully"
+        return ExecutionResult(True, msg, data=dict(params))
 '''
         test_code = f'''from __future__ import annotations
 

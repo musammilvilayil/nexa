@@ -15,6 +15,11 @@ class MouseController:
     def _get_controller(self):
         if self._controller is None:
             try:
+                try:
+                    from computer.win32_desktop import ensure_desktop_attached
+                    ensure_desktop_attached()
+                except Exception:
+                    pass
                 from pynput import mouse
                 self._pynput_mouse = mouse
                 self._controller = mouse.Controller()
