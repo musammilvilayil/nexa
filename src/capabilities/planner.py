@@ -106,7 +106,7 @@ class CapabilityPlanner:
                 purpose="Safely compresses files/directories into a ZIP file within workspace",
                 operation="create",
                 risk_tier=RiskTier.MUTATE,
-                intents=("create zip", "zip file", "compress zip", "/zip create", "zip directory", "zip"),
+                intents=("create zip", "zip file", "compress zip", "/zip create", "zip directory", "zip folder"),
                 dependencies=("zipfile", "pathlib"),
                 extracted_params={
                     "source_path": source or ".",

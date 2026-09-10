@@ -91,3 +91,10 @@ def get_desktop_session_info() -> dict[str, Any]:
             "monitors": 0,
             "error": str(exc),
         }
+
+
+def is_desktop_accessible() -> bool:
+    """Check if the current Windows desktop session is interactive and accessible."""
+    info = get_desktop_session_info()
+    return bool(info.get("interactive", False))
+

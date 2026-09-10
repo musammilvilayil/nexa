@@ -367,7 +367,8 @@ class {class_name}:
         normalized = " ".join(text.strip().split()).lower()
         intents = {list(plan.intents)}
         for intent in intents:
-            if intent in normalized:
+            pattern = r"(?<![a-zA-Z0-9_.])" + re.escape(intent) + r"(?![a-zA-Z0-9_.])"
+            if re.search(pattern, normalized):
                 params = dict({dict(plan.extracted_params)})
                 for word in text.split():
                     w = word.strip("'\\",;:")

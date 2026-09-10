@@ -38,6 +38,12 @@ class SkillRegistry:
     def list_metadata(self):
         return tuple(self._skills[name].metadata for name in self._order)
 
+    def has_skill(self, name: str) -> bool:
+        return name in self._skills
+
+    def __contains__(self, name: str) -> bool:
+        return name in self._skills
+
     def resolve(self, text: str, context: Mapping[str, Any]) -> SkillMatch | None:
         candidates: list[tuple[int, SkillMatch]] = []
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
@@ -17,13 +17,17 @@ class VisionBackend(Protocol):
 @dataclass(frozen=True)
 class ScreenState:
     """Represents the rich, structured current state of the screen."""
+    screenshot: bytes | None = None
     active_window: str = ""
     active_application: str = ""
     visible_text: str = ""
+    semantic_elements: tuple[UIElement, ...] = ()
     buttons: tuple[UIElement, ...] = ()
     inputs: tuple[UIElement, ...] = ()
     links: tuple[UIElement, ...] = ()
     menus: tuple[UIElement, ...] = ()
+    checkboxes: tuple[UIElement, ...] = ()
+    dropdowns: tuple[UIElement, ...] = ()
     dialogs: tuple[UIElement, ...] = ()
     elements: tuple[Any, ...] = ()
     description: str = ""
@@ -31,12 +35,38 @@ class ScreenState:
     timestamp: str = ""
     raw: Any = None
 
+    def find_element_by_text(self, text: str) -> UIElement | None:
+        """Find the first semantic element matching text case-insensitively."""
+        t_clean = text.strip().lower()
+        for el in self.semantic_elements:
+            if t_clean in el.name.lower() or (el.text and t_clean in el.text.lower()):
+                return el
+        return None
+
+    def find_element_by_role(self, role: str) -> list[UIElement]:
+        """Find all semantic elements with given element role."""
+        r_clean = role.strip().lower()
+        return [el for el in self.semantic_elements if el.element_type.lower() == r_clean]
+
+    def find_element_by_control_type(self, control_type: str) -> list[UIElement]:
+        """Find elements matching control type (button, input, link, menu, checkbox, dropdown)."""
+        return self.find_element_by_role(control_type)
+
+    def find_element_by_coordinates(self, x: int, y: int) -> UIElement | None:
+        """Find the semantic element bounding the given screen coordinates."""
+        for el in self.semantic_elements:
+            if el.bounds:
+                bx, by, bw, bh = el.bounds.x, el.bounds.y, el.bounds.width, el.bounds.height
+                if bx <= x <= bx + bw and by <= y <= by + bh:
+                    return el
+        return None
+
 
 def inspect_window_semantic_elements(hwnd: int) -> tuple[UIElement, ...]:
     """Inspect semantic controls in a native Windows window using Win32 API.
     
     Prefers native control classification (buttons, edit controls, combo boxes,
-    menus, lists) over blind pixel coordinates.
+    menus, lists, checkboxes) over blind pixel coordinates.
     """
     if sys.platform != "win32" or not hwnd:
         return ()
@@ -76,12 +106,16 @@ def inspect_window_semantic_elements(hwnd: int) -> tuple[UIElement, ...]:
 
             # Determine element type from class
             elem_type = "unknown"
-            if "button" in class_name:
+            if "check" in class_name:
+                elem_type = "checkbox"
+            elif "combobox" in class_name:
+                elem_type = "dropdown"
+            elif "listbox" in class_name:
+                elem_type = "menu"
+            elif "button" in class_name:
                 elem_type = "button"
             elif "edit" in class_name or "rich" in class_name:
                 elem_type = "input"
-            elif "combobox" in class_name or "listbox" in class_name:
-                elem_type = "menu"
             elif "link" in class_name or "syslink" in class_name:
                 elem_type = "link"
             elif "dialog" in class_name or "#32770" in class_name:
@@ -153,6 +187,8 @@ class ScreenAnalyzer:
         inputs = tuple(e for e in semantic_elements if e.element_type == "input")
         links = tuple(e for e in semantic_elements if e.element_type == "link")
         menus = tuple(e for e in semantic_elements if e.element_type == "menu")
+        checkboxes = tuple(e for e in semantic_elements if e.element_type == "checkbox")
+        dropdowns = tuple(e for e in semantic_elements if e.element_type == "dropdown")
         dialogs = tuple(e for e in semantic_elements if e.element_type == "dialog")
 
         # 2. Vision provider analysis if backend is configured and screenshot provided
@@ -162,13 +198,17 @@ class ScreenAnalyzer:
                 vision_elements = tuple(result.get("elements", []))
                 all_elements = tuple(list(semantic_elements) + list(vision_elements))
                 return ScreenState(
+                    screenshot=screenshot,
                     active_window=result.get("active_window") or active_window_title,
                     active_application=active_app,
                     visible_text=result.get("visible_text", ""),
+                    semantic_elements=semantic_elements,
                     buttons=buttons,
                     inputs=inputs,
                     links=links,
                     menus=menus,
+                    checkboxes=checkboxes,
+                    dropdowns=dropdowns,
                     dialogs=dialogs,
                     elements=all_elements,
                     description=result.get("description", "Vision backend visual analysis"),
@@ -178,12 +218,16 @@ class ScreenAnalyzer:
                 )
             except Exception as exc:
                 return ScreenState(
+                    screenshot=screenshot,
                     active_window=active_window_title,
                     active_application=active_app,
+                    semantic_elements=semantic_elements,
                     buttons=buttons,
                     inputs=inputs,
                     links=links,
                     menus=menus,
+                    checkboxes=checkboxes,
+                    dropdowns=dropdowns,
                     dialogs=dialogs,
                     elements=semantic_elements,
                     description=f"Vision analysis failed: {exc}",
@@ -200,19 +244,82 @@ class ScreenAnalyzer:
         )
 
         return ScreenState(
+            screenshot=screenshot,
             active_window=active_window_title,
             active_application=active_app,
             visible_text="",
+            semantic_elements=semantic_elements,
             buttons=buttons,
             inputs=inputs,
             links=links,
             menus=menus,
+            checkboxes=checkboxes,
+            dropdowns=dropdowns,
             dialogs=dialogs,
             elements=semantic_elements,
             description=desc,
             confidence=1.0 if semantic_elements else 0.5,
             timestamp=now,
         )
+
+    def find_element_by_text(self, text: str) -> UIElement | None:
+        """Find element by text in currently active window."""
+        state = self.analyze()
+        return state.find_element_by_text(text)
+
+    def find_element_by_role(self, role: str) -> list[UIElement]:
+        """Find elements by semantic role in currently active window."""
+        state = self.analyze()
+        return state.find_element_by_role(role)
+
+    def find_element_by_control_type(self, control_type: str) -> list[UIElement]:
+        """Find elements by control type in currently active window."""
+        return self.find_element_by_role(control_type)
+
+    def find_element_by_coordinates(self, x: int, y: int) -> UIElement | None:
+        """Find semantic element bounding given coordinates."""
+        state = self.analyze()
+        return state.find_element_by_coordinates(x, y)
+
+    def find_element_by_visual_description(
+        self,
+        description: str,
+        screenshot: bytes | None = None,
+    ) -> dict[str, Any] | None:
+        """Find UI element by description using semantic tree or vision backend."""
+        # 1. Prefer semantic match
+        elem = self.find_element_by_text(description)
+        if elem and elem.bounds:
+            return {
+                "found": True,
+                "name": elem.name,
+                "text": elem.text,
+                "type": elem.element_type,
+                "x": elem.bounds.x,
+                "y": elem.bounds.y,
+                "width": elem.bounds.width,
+                "height": elem.bounds.height,
+            }
+
+        # 2. Vision provider fallback if screenshot and backend available
+        if self._backend is None or not self._backend.is_available() or not screenshot:
+            return None
+
+        try:
+            result = self._backend.analyze_image(
+                screenshot,
+                f"Find the UI element matching this description: '{description}'. "
+                f"Return a JSON with 'found': true/false, 'x': int, 'y': int, 'text': str",
+            )
+            if result.get("found"):
+                return result
+            return None
+        except Exception:
+            return None
+
+    def find_element(self, screenshot: bytes, description: str) -> dict[str, Any] | None:
+        """Backwards-compatible find_element method."""
+        return self.find_element_by_visual_description(description, screenshot)
 
     def verify_action(self, before: bytes, after: bytes, expected: str) -> bool:
         """Verify whether an action succeeded by comparing state."""
@@ -229,39 +336,3 @@ class ScreenAnalyzer:
             return bool(result.get("success", True))
         except Exception:
             return before != after
-
-    def find_element(self, screenshot: bytes, description: str) -> dict[str, Any] | None:
-        """Find a UI element by description using semantic tree or vision backend."""
-        # Check active window semantic elements first
-        if self._window_manager:
-            active_win = self._window_manager.get_active_window()
-            if active_win:
-                semantic = inspect_window_semantic_elements(active_win.handle)
-                desc_lower = description.lower()
-                for el in semantic:
-                    if desc_lower in el.name.lower() or (el.text and desc_lower in el.text.lower()):
-                        return {
-                            "found": True,
-                            "name": el.name,
-                            "text": el.text,
-                            "type": el.element_type,
-                            "x": el.bounds.x if el.bounds else 0,
-                            "y": el.bounds.y if el.bounds else 0,
-                            "width": el.bounds.width if el.bounds else 0,
-                            "height": el.bounds.height if el.bounds else 0,
-                        }
-
-        if self._backend is None or not self._backend.is_available():
-            return None
-
-        try:
-            result = self._backend.analyze_image(
-                screenshot,
-                f"Find the UI element matching this description: '{description}'. "
-                f"Return a JSON with 'found': true/false, 'x': int, 'y': int, 'text': str",
-            )
-            if result.get("found"):
-                return result
-            return None
-        except Exception:
-            return None

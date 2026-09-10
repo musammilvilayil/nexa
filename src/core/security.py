@@ -62,6 +62,17 @@ class SecurityGate:
     def critical_cooldown_seconds(self) -> float:
         return self._critical_cooldown_seconds
 
+    def evaluate(
+        self,
+        skill_name: str = "",
+        operation: str = "",
+        params: dict | None = None,
+        risk: RiskTier = RiskTier.MUTATE,
+        confirmed: bool = False,
+    ) -> PolicyDecision:
+        """Convenience evaluation method for action proposals."""
+        return self.decide(risk, confirmed=confirmed)
+
     def decide(self, risk: RiskTier, *, confirmed: bool = False) -> PolicyDecision:
         """Evaluate a risk tier and return a policy decision.
 

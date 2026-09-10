@@ -3,7 +3,9 @@ __pycache__/
 *.pyc
 data/*.db
 data/generated_skills/
+data/capabilities/
 logs/
 .env
 .env.*
 data/market/*.csv
+

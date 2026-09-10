@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -14,6 +15,14 @@ _WRITE_RE = re.compile(r"^(?:/file\s+write|file\s+write)\s+(.+?)\s+::\s+(.*)$", 
 _PATCH_RE = re.compile(
     r"^(?:/file\s+patch|file\s+patch)\s+(.+?)\s+::\s+(.*?)\s+=>\s+(.*)$",
     re.IGNORECASE | re.DOTALL,
+)
+_MOVE_RE = re.compile(
+    r"^(?:/file\s+move|file\s+move|move\s+file)\s+(\S+)\s+(?:to\s+)?(\S+)$",
+    re.IGNORECASE,
+)
+_COPY_RE = re.compile(
+    r"^(?:/file\s+copy|file\s+copy|copy\s+file)\s+(\S+)\s+(?:to\s+)?(\S+)$",
+    re.IGNORECASE,
 )
 _NL_WRITE_FOLDER_FILE_RE = re.compile(
     r"^(?:create\s+(?:a\s+)?folder\s+(?:called\s+)?([A-Za-z0-9_\-\.]+)\s+.*?\s+and\s+create\s+([A-Za-z0-9_\-\.]+)\s+containing\s+(.*))$",
@@ -48,6 +57,8 @@ class FileSkill:
                 OperationSpec("write", "Create or replace a UTF-8 file", RiskTier.MUTATE),
                 OperationSpec("patch", "Replace one exact text occurrence", RiskTier.MUTATE),
                 OperationSpec("mkdir", "Create a directory in the workspace", RiskTier.MUTATE),
+                OperationSpec("move", "Move or rename a file within the workspace", RiskTier.MUTATE),
+                OperationSpec("copy", "Copy a file within the workspace", RiskTier.MUTATE),
             ),
         )
 
@@ -91,6 +102,14 @@ class FileSkill:
             dpath = next(g for g in mkdir_match.groups() if g is not None).strip()
             return SkillMatch("files", "mkdir", {"path": dpath})
 
+        move_match = _MOVE_RE.fullmatch(normalized)
+        if move_match:
+            return SkillMatch("files", "move", {"source": move_match.group(1).strip(), "dest": move_match.group(2).strip()})
+
+        copy_match = _COPY_RE.fullmatch(normalized)
+        if copy_match:
+            return SkillMatch("files", "copy", {"source": copy_match.group(1).strip(), "dest": copy_match.group(2).strip()})
+
         return None
 
     def validate(
@@ -115,6 +134,10 @@ class FileSkill:
         if operation == "mkdir":
             path = self._resolve(root, str(params.get("path", "")), allow_root=False)
             return {"root": root, "path": path}
+        if operation in ("move", "copy"):
+            src = self._resolve(root, str(params.get("source", "")))
+            dst = self._resolve(root, str(params.get("dest", "")))
+            return {"root": root, "source": src, "dest": dst}
         if operation == "patch":
             path = self._resolve(root, str(params.get("path", "")))
             old = str(params.get("old", ""))
@@ -132,7 +155,7 @@ class FileSkill:
         params: Mapping[str, Any],
         context: Mapping[str, Any],
     ) -> ExecutionResult:
-        path: Path = params["path"]
+        path: Path | None = params.get("path")
         root: Path = params["root"]
 
         if operation == "list":
@@ -194,6 +217,24 @@ class FileSkill:
                 return ExecutionResult(False, "patched file exceeds write limit", error="file too large")
             path.write_text(updated, encoding="utf-8")
             return ExecutionResult(True, f"Patched {path.relative_to(root).as_posix()}")
+
+        if operation == "move":
+            src = params["source"]
+            dst = params["dest"]
+            if not src.exists() or not src.is_file():
+                return ExecutionResult(False, "source file not found", error="source file not found")
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(src, dst)
+            return ExecutionResult(True, f"Moved {src.name} to {dst.name}", data={"source": str(src), "dest": str(dst)})
+
+        if operation == "copy":
+            src = params["source"]
+            dst = params["dest"]
+            if not src.exists() or not src.is_file():
+                return ExecutionResult(False, "source file not found", error="source file not found")
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            return ExecutionResult(True, f"Copied {src.name} to {dst.name}", data={"source": str(src), "dest": str(dst)})
 
         return ExecutionResult(False, "unknown file operation", error="unknown operation")
 

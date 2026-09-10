@@ -30,6 +30,7 @@ class CapabilityManager:
         planner: CapabilityPlanner | None = None,
         builder: SkillBuilder | None = None,
         storage_dir: str | Path | None = None,
+        max_failures_before_disable: int = 3,
     ) -> None:
         self.store = store
         self.planner = planner or CapabilityPlanner()
@@ -38,7 +39,11 @@ class CapabilityManager:
             storage_dir or (Path(__file__).resolve().parents[2] / "data" / "capabilities")
         ).expanduser().resolve()
         self.storage_dir.mkdir(parents=True, exist_ok=True)
+        self.max_failures_before_disable = max_failures_before_disable
         self._loaded_skills: dict[str, Skill] = {}
+        self._failure_counts: dict[str, int] = {}
+        self._success_counts: dict[str, int] = {}
+        self._disabled_capabilities: set[str] = set()
 
     def load_all_into_registry(self, registry: SkillRegistry) -> int:
         """Loads all persisted capabilities from the store into the given SkillRegistry."""
@@ -46,6 +51,8 @@ class CapabilityManager:
         records = self.store.list_capabilities()
         for record in records:
             if record.test_status != "passed":
+                continue
+            if record.spec.capability_id in self._disabled_capabilities:
                 continue
             module_file = Path(record.module_path)
             if not module_file.is_file():
@@ -83,6 +90,14 @@ class CapabilityManager:
             return None
 
         cap_id = plan.capability_id
+        if cap_id in self._disabled_capabilities:
+            self.log_event(
+                CapabilityEventType.CAPABILITY_DISABLED,
+                cap_id,
+                f"Capability '{cap_id}' is disabled due to previous failures and will not be loaded",
+            )
+            return None
+
         self.log_event(
             CapabilityEventType.CAPABILITY_MISSING,
             cap_id,
@@ -186,8 +201,16 @@ class CapabilityManager:
             )
             return None
 
-    def record_execution(self, capability_id: str, success: bool = True, error: str | None = None) -> None:
+    def record_execution(
+        self,
+        capability_id: str,
+        success: bool = True,
+        error: str | None = None,
+        registry: SkillRegistry | None = None,
+    ) -> None:
         if success:
+            self._success_counts[capability_id] = self._success_counts.get(capability_id, 0) + 1
+            self._failure_counts[capability_id] = 0
             self.store.record_usage(capability_id)
             self.log_event(
                 CapabilityEventType.CAPABILITY_EXECUTED,
@@ -195,11 +218,98 @@ class CapabilityManager:
                 f"Capability '{capability_id}' executed successfully",
             )
         else:
+            failures = self._failure_counts.get(capability_id, 0) + 1
+            self._failure_counts[capability_id] = failures
             self.log_event(
                 CapabilityEventType.CAPABILITY_EXECUTION_FAILED,
                 capability_id,
-                f"Capability '{capability_id}' execution failed: {error}",
+                f"Capability '{capability_id}' execution failed: {error} (consecutive failures: {failures})",
             )
+            if failures >= self.max_failures_before_disable:
+                self.disable_capability(capability_id, registry=registry)
+
+    def disable_capability(self, capability_id: str, registry: SkillRegistry | None = None) -> bool:
+        """Disables a capability, preventing its execution/loading and unregistering it if loaded."""
+        self._disabled_capabilities.add(capability_id)
+        target_key = None
+        skill = self._loaded_skills.get(capability_id)
+        if skill:
+            target_key = capability_id
+        else:
+            for k, s in list(self._loaded_skills.items()):
+                if getattr(s, "metadata", None) and s.metadata.name == capability_id:
+                    target_key = k
+                    skill = s
+                    break
+
+        if target_key:
+            self._loaded_skills.pop(target_key, None)
+
+        unregistered = False
+        if registry is not None:
+            if skill and getattr(skill, "metadata", None):
+                unregistered = registry.unregister(skill.metadata.name)
+            if not unregistered and registry.has_skill(capability_id):
+                unregistered = registry.unregister(capability_id)
+
+        self.log_event(
+            CapabilityEventType.CAPABILITY_DISABLED,
+            capability_id,
+            f"Capability '{capability_id}' disabled after repeated failures or administrative policy",
+            {"unregistered": unregistered, "failures": self._failure_counts.get(capability_id, 0)},
+        )
+        return True
+
+    def enable_capability(self, capability_id: str, registry: SkillRegistry | None = None) -> bool:
+        """Re-enables a previously disabled capability."""
+        self._disabled_capabilities.discard(capability_id)
+        self._failure_counts[capability_id] = 0
+        self.log_event(
+            CapabilityEventType.CAPABILITY_ENABLED,
+            capability_id,
+            f"Capability '{capability_id}' re-enabled",
+        )
+        if registry is not None and capability_id not in self._loaded_skills:
+            record = self.store.get_capability(capability_id)
+            if record and record.test_status == "passed":
+                module_file = Path(record.module_path)
+                if module_file.is_file():
+                    try:
+                        skill = self._instantiate_skill(module_file, record.class_name, record.spec.name)
+                        registry.register(skill)
+                        self._loaded_skills[capability_id] = skill
+                        return True
+                    except Exception:
+                        pass
+        return True
+
+    def get_capability_health(self, capability_id: str) -> dict[str, Any]:
+        """Returns the health status and metric details for a capability."""
+        is_disabled = capability_id in self._disabled_capabilities
+        failures = self._failure_counts.get(capability_id, 0)
+        successes = self._success_counts.get(capability_id, 0)
+
+        if is_disabled:
+            status = "disabled"
+        elif failures > 0:
+            status = "degraded"
+        else:
+            status = "healthy"
+
+        health_data = {
+            "capability_id": capability_id,
+            "status": status,
+            "failure_count": failures,
+            "success_count": successes,
+            "is_disabled": is_disabled,
+        }
+        self.log_event(
+            CapabilityEventType.CAPABILITY_HEALTH_CHECKED,
+            capability_id,
+            f"Health checked for '{capability_id}': {status}",
+            health_data,
+        )
+        return health_data
 
     def log_event(
         self,
@@ -221,10 +331,26 @@ class CapabilityManager:
 
     def rollback_capability(self, capability_id: str, registry: SkillRegistry | None = None) -> bool:
         """Rollback and unregister a dynamic capability."""
-        skill = self._loaded_skills.pop(capability_id, None)
+        target_key = None
+        skill = self._loaded_skills.get(capability_id)
+        if skill:
+            target_key = capability_id
+        else:
+            for k, s in list(self._loaded_skills.items()):
+                if getattr(s, "metadata", None) and s.metadata.name == capability_id:
+                    target_key = k
+                    skill = s
+                    break
+
+        if target_key:
+            self._loaded_skills.pop(target_key, None)
+
         unregistered = False
-        if skill and registry is not None:
-            unregistered = registry.unregister(skill.metadata.name)
+        if registry is not None:
+            if skill and getattr(skill, "metadata", None):
+                unregistered = registry.unregister(skill.metadata.name)
+            if not unregistered and registry.has_skill(capability_id):
+                unregistered = registry.unregister(capability_id)
 
         # Mark in store or log event
         self.log_event(

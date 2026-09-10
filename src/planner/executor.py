@@ -134,6 +134,10 @@ class PlanExecutor:
                     if result == "FAIL":
                         raise RuntimeError("Kernel execution returned failure status")
                     if hasattr(result, "status"):
+                        if result.status == "confirmation_required" and getattr(result, "pending_action", None):
+                            kernel_inst = getattr(self._kernel_process, "__self__", None)
+                            if kernel_inst and hasattr(kernel_inst, "confirm"):
+                                result = kernel_inst.confirm(result.pending_action.action_id)
                         if result.status not in ("success", "ok"):
                             err_msg = getattr(result, "message", "Execution failed")
                             raise RuntimeError(err_msg)

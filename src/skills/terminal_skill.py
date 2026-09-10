@@ -254,10 +254,20 @@ class TerminalSkill:
     def _parse_command(command: str) -> list[str]:
         """Parse command string into argument list for subprocess."""
         try:
-            return shlex.split(command, posix=os.name != "nt")
+            parts = shlex.split(command, posix=os.name != "nt")
         except ValueError:
             # Fall back to simple split on parse error
-            return command.strip().split()
+            parts = command.strip().split()
+
+        # On non-posix mode (Windows), shlex keeps outer quotes on tokens.
+        # Strip outer quotes so subprocess does not double-quote them.
+        cleaned = []
+        for p in parts:
+            if len(p) >= 2 and p[0] == p[-1] and p[0] in ('"', "'"):
+                cleaned.append(p[1:-1])
+            else:
+                cleaned.append(p)
+        return cleaned
 
     def _truncate(self, text: str) -> str:
         """Truncate output to max bytes."""
