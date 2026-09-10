@@ -70,6 +70,16 @@ class NexaRuntime:
     task_planner: Any | None = None
     plan_executor: Any | None = None
     task_store: Any | None = None
+    extension_registry: Any | None = None
+    mcp_extension: Any | None = None
+    mcp_skill: Any | None = None
+    token_store: Any | None = None
+    oauth_manager: Any | None = None
+    scheduler_extension: Any | None = None
+    long_running_manager: Any | None = None
+    multi_agent_extension: Any | None = None
+    research_orchestrator: Any | None = None
+    observability: Any | None = None
 
 
 def _workspace_roots() -> tuple[Path, ...]:
@@ -346,6 +356,61 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
     task_planner = TaskPlanner(registry=registry, capability_manager=capability_manager)
     plan_executor = PlanExecutor(kernel_process=kernel.process, task_store=task_store)
 
+    # ── Level 5 Extensions & Subsystems ────────────────────────────────
+    from extensions.registry import ExtensionRegistry
+    from extensions.mcp_extension import DefaultMCPExtension
+    from extensions.scheduler_extension import SchedulerExtension
+    from extensions.multi_agent_extension import MultiAgentExtension
+    from skills.mcp_skill import MCPSkill
+    from auth.token_store import TokenStore
+    from auth.oauth_manager import OAuthManager
+    from planner.long_running import LongRunningTaskManager
+    from research.orchestrator import ResearchOrchestrator
+    from core.observability import ObservabilityEngine
+
+    extension_registry = ExtensionRegistry()
+    mcp_extension = DefaultMCPExtension(security_gate=security_gate)
+    extension_registry.register("mcp", mcp_extension)
+    mcp_extension.initialize()
+
+    mcp_skill = MCPSkill(mcp_extension)
+    registry.register(mcp_skill)
+
+    tokens_db_path = Path(
+        os.getenv("NEXA_TOKENS_DB", str(PROJECT_ROOT / "data" / "tokens.db"))
+    ).expanduser().resolve()
+    token_store = TokenStore(tokens_db_path)
+    oauth_manager = OAuthManager(token_store=token_store)
+
+    scheduler_db_path = Path(
+        os.getenv("NEXA_SCHEDULER_DB", str(PROJECT_ROOT / "data" / "scheduler.db"))
+    ).expanduser().resolve()
+    scheduler_extension = SchedulerExtension(
+        db_path=scheduler_db_path,
+        security_gate=security_gate,
+        executor_callback=lambda job: kernel.process(job.goal),
+    )
+    extension_registry.register("scheduler", scheduler_extension)
+    scheduler_extension.initialize()
+
+    multi_agent_extension = MultiAgentExtension(security_gate=security_gate)
+    extension_registry.register("multi_agent", multi_agent_extension)
+    multi_agent_extension.initialize()
+
+    long_running_manager = LongRunningTaskManager(
+        executor=plan_executor,
+        task_store=task_store,
+    )
+
+    research_orchestrator = ResearchOrchestrator()
+    observability = ObservabilityEngine()
+
+    context_bus.set_environment_flag("level5_mcp_available", True)
+    context_bus.set_environment_flag("level5_oauth_available", True)
+    context_bus.set_environment_flag("level5_scheduler_available", True)
+    context_bus.set_environment_flag("level5_multi_agent_available", True)
+    context_bus.set_environment_flag("level5_advanced_memory_available", True)
+
     return NexaRuntime(
         kernel=kernel,
         registry=registry,
@@ -373,6 +438,16 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
         task_planner=task_planner,
         plan_executor=plan_executor,
         task_store=task_store,
+        extension_registry=extension_registry,
+        mcp_extension=mcp_extension,
+        mcp_skill=mcp_skill,
+        token_store=token_store,
+        oauth_manager=oauth_manager,
+        scheduler_extension=scheduler_extension,
+        long_running_manager=long_running_manager,
+        multi_agent_extension=multi_agent_extension,
+        research_orchestrator=research_orchestrator,
+        observability=observability,
     )
 
 

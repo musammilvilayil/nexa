@@ -13,12 +13,21 @@ class TaskStore:
     """Thread-safe SQLite storage for task history, state, and execution records."""
 
     def __init__(self, db_path: Path | str) -> None:
-        self.db_path = Path(db_path).expanduser().resolve()
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.is_memory = str(db_path) == ":memory:"
+        if self.is_memory:
+            self.db_path = ":memory:"
+            self._mem_conn = sqlite3.connect(":memory:", check_same_thread=False)
+            self._mem_conn.row_factory = sqlite3.Row
+        else:
+            self.db_path = Path(db_path).expanduser().resolve()
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._mem_conn = None
         self._lock = threading.Lock()
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
+        if self.is_memory:
+            return self._mem_conn
         conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn
@@ -105,6 +114,13 @@ class TaskStore:
     def list_tasks(self, limit: int = 20) -> list[TaskRecord]:
         with self._lock, self._get_connection() as conn:
             cur = conn.execute("SELECT * FROM tasks ORDER BY updated_at DESC LIMIT ?", (limit,))
+            return [self._row_to_record(row) for row in cur.fetchall()]
+
+    def list_active_tasks(self) -> list[TaskRecord]:
+        with self._lock, self._get_connection() as conn:
+            cur = conn.execute(
+                "SELECT * FROM tasks WHERE state IN ('in_progress', 'running', 'pending') ORDER BY updated_at DESC"
+            )
             return [self._row_to_record(row) for row in cur.fetchall()]
 
     def cancel_task(self, task_id: str) -> bool:

@@ -342,8 +342,207 @@ class DeviceContext:
             }
 
 
+@dataclass
+class EpisodeRecord:
+    episode_id: str
+    summary: str
+    details: dict[str, Any] = field(default_factory=dict)
+    outcome: str = "success"
+    timestamp: str = field(default_factory=_utc_now)
+
+
+class EpisodicMemory:
+    """Layer 8: Stores chronological episodic memories of user interactions, task executions, and outcomes."""
+
+    def __init__(self, max_episodes: int = 500) -> None:
+        self.max_episodes = max_episodes
+        self._episodes: list[EpisodeRecord] = []
+        self._lock = threading.Lock()
+
+    def store_episode(
+        self,
+        summary: str,
+        details: Mapping[str, Any] | None = None,
+        outcome: str = "success",
+        timestamp: str | None = None,
+    ) -> EpisodeRecord:
+        with self._lock:
+            ep = EpisodeRecord(
+                episode_id=f"ep_{len(self._episodes) + 1}",
+                summary=summary,
+                details=dict(details or {}),
+                outcome=outcome,
+                timestamp=timestamp or _utc_now(),
+            )
+            self._episodes.append(ep)
+            if len(self._episodes) > self.max_episodes:
+                self._episodes.pop(0)
+            return ep
+
+    def recall_episodes(self, query: str = "", limit: int = 10) -> list[dict[str, Any]]:
+        with self._lock:
+            q = query.lower().strip()
+            matches = [
+                asdict(e)
+                for e in self._episodes
+                if not q or q in e.summary.lower() or any(q in str(v).lower() for v in e.details.values())
+            ]
+            return matches[-limit:] if limit > 0 else matches
+
+    def get_timeline(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self._lock:
+            return [asdict(e) for e in self._episodes[-limit:]]
+
+
+@dataclass(frozen=True)
+class FactRecord:
+    subject: str
+    predicate: str
+    object_: str
+    confidence: float = 1.0
+    created_at: str = field(default_factory=_utc_now)
+
+
+class SemanticMemory:
+    """Layer 9: Stores structured knowledge graph facts (subject, predicate, object, confidence)."""
+
+    def __init__(self) -> None:
+        self._facts: list[FactRecord] = []
+        self._lock = threading.Lock()
+
+    def store_fact(
+        self,
+        subject: str,
+        predicate: str,
+        object_: str,
+        confidence: float = 1.0,
+    ) -> FactRecord:
+        with self._lock:
+            s_clean = subject.strip().lower()
+            p_clean = predicate.strip().lower()
+            self._facts = [
+                f for f in self._facts
+                if not (f.subject.lower() == s_clean and f.predicate.lower() == p_clean)
+            ]
+            fact = FactRecord(
+                subject=subject.strip(),
+                predicate=predicate.strip(),
+                object_=object_.strip(),
+                confidence=confidence,
+            )
+            self._facts.append(fact)
+            return fact
+
+    def query_facts(
+        self,
+        subject: str | None = None,
+        predicate: str | None = None,
+        object_: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            results = []
+            for f in self._facts:
+                if subject and subject.lower() not in f.subject.lower():
+                    continue
+                if predicate and predicate.lower() not in f.predicate.lower():
+                    continue
+                if object_ and object_.lower() not in f.object_.lower():
+                    continue
+                results.append({
+                    "subject": f.subject,
+                    "predicate": f.predicate,
+                    "object": f.object_,
+                    "confidence": f.confidence,
+                    "created_at": f.created_at,
+                })
+            return results
+
+    def find_related(self, entity: str) -> list[dict[str, Any]]:
+        with self._lock:
+            ent = entity.lower().strip()
+            return [
+                {
+                    "subject": f.subject,
+                    "predicate": f.predicate,
+                    "object": f.object_,
+                    "confidence": f.confidence,
+                }
+                for f in self._facts
+                if ent in f.subject.lower() or ent in f.object_.lower()
+            ]
+
+
+@dataclass
+class ProcedureRecord:
+    task_type: str
+    steps: list[dict[str, Any]]
+    prerequisites: list[str] = field(default_factory=list)
+    success_rate: float = 1.0
+    use_count: int = 1
+    created_at: str = field(default_factory=_utc_now)
+
+
+class ProceduralMemory:
+    """Layer 10: Stores reusable execution workflows and learned procedural playbooks."""
+
+    def __init__(self) -> None:
+        self._procedures: dict[str, ProcedureRecord] = {}
+        self._lock = threading.Lock()
+
+    def store_procedure(
+        self,
+        task_type: str,
+        steps: list[dict[str, Any]],
+        prerequisites: list[str] | None = None,
+        success_rate: float = 1.0,
+    ) -> ProcedureRecord:
+        with self._lock:
+            key = task_type.strip().lower()
+            existing = self._procedures.get(key)
+            if existing:
+                existing.steps = list(steps)
+                existing.prerequisites = list(prerequisites or [])
+                existing.success_rate = (existing.success_rate + success_rate) / 2.0
+                existing.use_count += 1
+                return existing
+
+            rec = ProcedureRecord(
+                task_type=task_type.strip(),
+                steps=list(steps),
+                prerequisites=list(prerequisites or []),
+                success_rate=success_rate,
+            )
+            self._procedures[key] = rec
+            return rec
+
+    def recall_procedure(self, task_type: str) -> dict[str, Any] | None:
+        with self._lock:
+            rec = self._procedures.get(task_type.strip().lower())
+            if not rec:
+                return None
+            return {
+                "task_type": rec.task_type,
+                "steps": [dict(s) for s in rec.steps],
+                "prerequisites": list(rec.prerequisites),
+                "success_rate": rec.success_rate,
+                "use_count": rec.use_count,
+            }
+
+    def list_procedures(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [
+                {
+                    "task_type": p.task_type,
+                    "step_count": len(p.steps),
+                    "success_rate": p.success_rate,
+                    "use_count": p.use_count,
+                }
+                for p in self._procedures.values()
+            ]
+
+
 class UnifiedMemory:
-    """Central unified multi-layer memory coordinating all 7 specialized memory layers."""
+    """Central unified multi-layer memory coordinating all 10 specialized memory layers."""
 
     def __init__(self) -> None:
         self.conversation = ConversationMemory()
@@ -353,6 +552,10 @@ class UnifiedMemory:
         self.application = ApplicationContext()
         self.browser = BrowserContext()
         self.device = DeviceContext()
+        # Level 5 Advanced Memory Layers:
+        self.episodic = EpisodicMemory()
+        self.semantic = SemanticMemory()
+        self.procedural = ProceduralMemory()
 
     def snapshot(self) -> dict[str, Any]:
         """Provides a composite serializable snapshot of all memory layers."""
@@ -364,4 +567,29 @@ class UnifiedMemory:
             "browser_page": self.browser.get_current_page(),
             "search_results_count": len(self.browser.get_search_results()),
             "device_info": self.device.get_device_info(),
+            "episodic_count": len(self.episodic.get_timeline(limit=100)),
+            "semantic_facts_count": len(self.semantic.query_facts()),
+            "procedures_count": len(self.procedural.list_procedures()),
         }
+
+    def unified_search(self, query: str, limit: int = 5) -> dict[str, list[Any]]:
+        """Cross-layer semantic and textual query across all memory layers."""
+        q = query.lower().strip()
+        results: dict[str, list[Any]] = {
+            "conversation": [
+                t for t in self.conversation.get_history(limit=50)
+                if q in t.get("content", "").lower()
+            ][:limit],
+            "preferences": [
+                {"key": k, "value": v}
+                for k, v in self.user_preferences.list_preferences().items()
+                if q in k.lower() or q in str(v).lower()
+            ][:limit],
+            "episodes": self.episodic.recall_episodes(query, limit=limit),
+            "facts": self.semantic.find_related(query)[:limit],
+            "procedures": [
+                p for p in self.procedural.list_procedures()
+                if q in p["task_type"].lower()
+            ][:limit],
+        }
+        return results

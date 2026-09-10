@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import sys
 import unittest
@@ -123,6 +123,42 @@ class ExtensionsTests(unittest.TestCase):
         self.assertTrue(reg.unregister("mcp"))
         self.assertFalse(reg.has("mcp"))
         self.assertFalse(reg.is_level5_ready(["mcp", "scheduler", "multi_agent"]))
+
+    def test_lifecycle_methods(self):
+        reg = ExtensionRegistry()
+        mcp = DummyMCPExtension()
+        meta = ExtensionMetadata(
+            name="mcp",
+            version="1.0.0",
+            category="protocol",
+            description="MCP Client",
+            status=ExtensionStatus.REGISTERED,
+        )
+        reg.register("mcp", mcp, meta)
+        self.assertEqual(reg.get_metadata("mcp").status, ExtensionStatus.REGISTERED)
+
+        # Initialize
+        self.assertTrue(reg.initialize("mcp"))
+        self.assertEqual(reg.get_metadata("mcp").status, ExtensionStatus.ACTIVE)
+
+        # Health check
+        hc = reg.health_check("mcp")
+        self.assertTrue(hc["healthy"])
+        self.assertEqual(hc["status"], "active")
+
+        # Shutdown
+        self.assertTrue(reg.shutdown("mcp"))
+        self.assertEqual(reg.get_metadata("mcp").status, ExtensionStatus.STOPPED)
+
+        # Recover
+        self.assertTrue(reg.recover("mcp"))
+        self.assertEqual(reg.get_metadata("mcp").status, ExtensionStatus.ACTIVE)
+
+        # Initialize all and shutdown all
+        init_res = reg.initialize_all()
+        self.assertTrue(init_res.get("mcp"))
+        reg.shutdown_all()
+        self.assertEqual(reg.get_metadata("mcp").status, ExtensionStatus.STOPPED)
 
 
 if __name__ == "__main__":

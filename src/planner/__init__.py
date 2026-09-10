@@ -4,6 +4,14 @@ from planner.task_planner import TaskPlanner
 from planner.executor import PlanExecutor
 from planner.composer import SkillComposer
 
+from planner.long_running import (
+    LongRunningTask,
+    LongRunningTaskManager,
+    LongRunningTaskState,
+    TaskPriority,
+    TaskProgress,
+)
+
 __all__ = [
     "PlanStep",
     "TaskPlan",
@@ -13,4 +21,9 @@ __all__ = [
     "TaskPlanner",
     "PlanExecutor",
     "SkillComposer",
+    "LongRunningTask",
+    "LongRunningTaskManager",
+    "LongRunningTaskState",
+    "TaskPriority",
+    "TaskProgress",
 ]

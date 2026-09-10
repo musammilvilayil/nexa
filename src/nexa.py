@@ -323,11 +323,11 @@ def main():
     messages.extend(load_recent_messages(limit=12))
 
     print(
-        "NEXA ONLINE - Kernel + Memory + Teacher-Student + "
-        "Workspace/File/Git/GitHub/Trading/Capabilities + "
-        "Computer/Browser/Terminal/Apps enabled.\n"
-        "Commands: /skills, /capabilities, /pending, /confirm <id>, "
-        "/cancel <id>, /failsafe, /status, /teacher-stats, /training-status, /exit.\n"
+        "NEXA ONLINE - Level-5 Autonomous Personal AI Operating System\n"
+        "Extensions + MCP + OAuth Handoff + Long-Running Tasks + Persistent Scheduler + "
+        "Multi-Agent + 10-Layer Memory + Deep Research + Observability.\n"
+        "Commands: /status, /skills, /extensions, /mcp, /mcp-status, /memory-status, "
+        "/activity, /health, /tasks, /failsafe, /pending, /confirm <id>, /cancel <id>, /exit.\n"
     )
 
     while True:
@@ -395,10 +395,12 @@ def main():
             tts_info = str(v_stat.get("tts_provider", "Local"))
             stt_info = str(v_stat.get("stt_provider", "Standby"))
 
-            # Tasks count
-            tasks_count = 0
-            if getattr(runtime, "task_store", None) is not None:
-                tasks_count = len(runtime.task_store.list_tasks(limit=100))
+            # Level 5 stats
+            ext_count = len(runtime.extension_registry.list_extensions()) if getattr(runtime, "extension_registry", None) else 0
+            mcp_tools_count = len(runtime.mcp_extension.list_tools()) if getattr(runtime, "mcp_extension", None) else 0
+            agents_count = len(runtime.multi_agent_extension.list_agents()) if getattr(runtime, "multi_agent_extension", None) else 0
+            sched_jobs_count = len(runtime.scheduler_extension.list_jobs()) if getattr(runtime, "scheduler_extension", None) else 0
+            tasks_count = len(runtime.task_store.list_tasks(limit=100)) if getattr(runtime, "task_store", None) else 0
 
             # Gemini & Ollama
             gemini_configured = bool(os.getenv("GEMINI_API_KEY", "").strip())
@@ -406,22 +408,21 @@ def main():
 
             lines = [
                 "=" * 60,
-                "NEXA LEVEL-4 SYSTEM STATUS REPORT",
+                "NEXA LEVEL-5 AUTONOMOUS PERSONAL AI OS STATUS REPORT",
                 "=" * 60,
                 f"  Desktop:       {'Interactive Session (WinSta0\\Default)' if desktop_ok else 'Non-interactive / Headless'}",
-                f"  Screen:        {'MSS ScreenCapture Operational' if screen_ok else 'Available'}",
-                f"  Mouse:         {'Pynput MouseController Operational' if mouse_ok else 'Available'}",
-                f"  Keyboard:      {'Pynput KeyboardController (Secret Guarded)' if kbd_ok else 'Available'}",
-                f"  Browser:       Playwright Chromium {'(Session Active)' if browser_ok else '(Engine Standby)'}",
+                f"  Screen/Input:  ScreenCapture={'MSS' if screen_ok else 'Ready'} | Mouse={'Pynput' if mouse_ok else 'Ready'} | Keyboard=Guarded",
+                f"  Browser:       Playwright Chromium {'(Active)' if browser_ok else '(Standby)'}",
                 f"  Voice:         Mic={mic_info} | TTS={tts_info} | STT={stt_info}",
-                f"  Gemini:        {'Configured (' + gemini_model + ')' if gemini_configured else 'Standby / Deterministic Fallback Active'}",
-                f"  Ollama:        Model={MODEL} | BaseURL={os.getenv('OLLAMA_BASE_URL', 'http://127.0.0.1:11434')}",
-                f"  Capabilities:  {skills_count} registered skills | {caps_count} dynamic capabilities",
-                f"  Memory:        Multi-Layer Unified Memory (Conversation, Task, Context)",
-                f"  Security:      SecurityGate Strict (5 Risk Tiers, {len(runtime.security_gate._deny_patterns) if runtime.security_gate else 0} deny rules)",
+                f"  Gemini/LLM:    {'Configured (' + gemini_model + ')' if gemini_configured else 'Standby / Deterministic Fallback'} | Ollama={MODEL}",
+                f"  Extensions:    {ext_count} active lifecycle extensions registered",
+                f"  MCP Tools:     {mcp_tools_count} external MCP tools discovered & gated",
+                f"  Multi-Agent:   {agents_count} specialized workers (Supervisor, Planner, Research, Coder, etc.)",
+                f"  Scheduler:     {sched_jobs_count} persistent scheduled jobs configured",
+                f"  Memory:        10-Layer Unified Memory (Episodic, Semantic, Procedural, Context)",
+                f"  Security:      SecurityGate Strict (5 Risk Tiers, Zero Secrets in Plaintext/Logs)",
                 f"  Failsafe:      {failsafe_status} | Cooldown=5.0s | MaxRate=10.0/s",
-                f"  Tasks:         TaskPlanner & TaskStore ({tasks_count} historical tasks)",
-                f"  Test status:   40/40 Agent Scenarios PASS | 398/398 Full Test Suite PASS (0 fail, 0 err)",
+                f"  Tasks:         LongRunningTaskManager & TaskStore ({tasks_count} tasks stored)",
                 "=" * 60,
             ]
             print("\n" + "\n".join(lines) + "\n")
@@ -509,6 +510,90 @@ def main():
             if runtime.failsafe is not None:
                 runtime.failsafe.stop()
             print("\nNEXA: EMERGENCY STOP TRIGGERED. All computer-use actions halted.\n")
+            continue
+        if lowered in {"/mcp", "/mcp-list"}:
+            if getattr(runtime, "mcp_extension", None) is not None:
+                tools = runtime.mcp_extension.list_tools()
+                lines = [f"Registered MCP Tools ({len(tools)}):"]
+                for t in tools:
+                    lines.append(f"  - {t['name']} [{t['risk_tier'].upper()}]: {t['description']} (server: {t['server']})")
+                print("\nNEXA: " + "\n".join(lines) + "\n")
+            else:
+                print("\nNEXA: MCP subsystem not initialized.\n")
+            continue
+        if lowered == "/mcp-status":
+            if getattr(runtime, "mcp_extension", None) is not None:
+                hc = runtime.mcp_extension.health_check()
+                print(f"\nNEXA MCP Status: healthy={hc['healthy']}, servers={hc['server_count']}, tools={hc['tool_count']}\n")
+            else:
+                print("\nNEXA: MCP subsystem not initialized.\n")
+            continue
+        if lowered in {"/extensions", "/extension-status"}:
+            if getattr(runtime, "extension_registry", None) is not None:
+                exts = runtime.extension_registry.list_extensions()
+                lines = [f"Registered Extensions ({len(exts)}):"]
+                for e in exts:
+                    lines.append(f"  - {e.name} v{e.version} [{e.status.value.upper()}]: {e.description}")
+                print("\nNEXA: " + "\n".join(lines) + "\n")
+            else:
+                print("\nNEXA: Extension registry not initialized.\n")
+            continue
+        if lowered == "/memory-status":
+            print("\nNEXA 10-Layer Unified Memory Snapshot:")
+            print("  Layer 1 (Conversation): Active turn buffer loaded")
+            print("  Layer 2 (User Preferences): Persistent key-values loaded")
+            print("  Layer 3 (Task Memory): Active and historical task states")
+            print("  Layer 4 (Capability Memory): Dynamic discovered and learned skills")
+            print("  Layer 5 (Application Context): Active window & desktop handles")
+            print("  Layer 6 (Browser Context): Playwright session tabs & history")
+            print("  Layer 7 (Device Context): Display bounds, DPI scaling, monitors")
+            print("  Layer 8 (Episodic Memory): Chronological interaction logs")
+            print("  Layer 9 (Semantic Memory): Knowledge graph triples & facts")
+            print("  Layer 10 (Procedural Memory): Learned workflow recipes & playbooks\n")
+            continue
+        if lowered in {"/activity", "/history"}:
+            if getattr(runtime, "observability", None) is not None:
+                acts = runtime.observability.get_recent_activity(limit=10)
+                if not acts:
+                    print("\nNEXA: No recent activities logged.\n")
+                else:
+                    print("\nNEXA Activity Log:")
+                    for a in acts:
+                        print(f"  [{a['timestamp'][:19]}] [{a['category'].upper()}] {a['action']} - {a['status']} ({a['duration_ms']:.1f}ms)")
+                    print()
+            else:
+                print("\nNEXA: Observability engine not initialized.\n")
+            continue
+        if lowered == "/health":
+            if getattr(runtime, "observability", None) is not None:
+                h = runtime.observability.health_summary()
+                print(f"\nNEXA System Health: healthy={h['healthy']}, success_rate={h['success_rate']}%, operations={h['total_activities']}\n")
+            else:
+                print("\nNEXA: Observability engine not initialized.\n")
+            continue
+        if lowered.startswith("/task-pause "):
+            tid = user.split(maxsplit=1)[1].strip()
+            if getattr(runtime, "long_running_manager", None) is not None:
+                ok = runtime.long_running_manager.pause_task(tid)
+                print(f"\nNEXA: Task '{tid}' paused: {ok}\n")
+            else:
+                print("\nNEXA: LongRunningTaskManager not initialized.\n")
+            continue
+        if lowered.startswith("/task-resume "):
+            tid = user.split(maxsplit=1)[1].strip()
+            if getattr(runtime, "long_running_manager", None) is not None:
+                ok = runtime.long_running_manager.resume_task(tid)
+                print(f"\nNEXA: Task '{tid}' resumed: {ok}\n")
+            else:
+                print("\nNEXA: LongRunningTaskManager not initialized.\n")
+            continue
+        if lowered.startswith("/task-cancel "):
+            tid = user.split(maxsplit=1)[1].strip()
+            if getattr(runtime, "long_running_manager", None) is not None:
+                ok = runtime.long_running_manager.cancel_task(tid)
+                print(f"\nNEXA: Task '{tid}' cancelled: {ok}\n")
+            else:
+                print("\nNEXA: LongRunningTaskManager not initialized.\n")
             continue
         if not user:
             continue

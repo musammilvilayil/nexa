@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -6,9 +6,13 @@ from typing import Any, Mapping, Protocol
 
 
 class ExtensionStatus(str, Enum):
+    DISCOVERED = "discovered"
     REGISTERED = "registered"
     INITIALIZED = "initialized"
     ACTIVE = "active"
+    DEGRADED = "degraded"
+    RECOVERING = "recovering"
+    STOPPED = "stopped"
     DISABLED = "disabled"
     ERROR = "error"
 
@@ -23,6 +27,13 @@ class ExtensionMetadata:
     status: ExtensionStatus = ExtensionStatus.REGISTERED
     supported_operations: tuple[str, ...] = ()
     extra: dict[str, Any] = field(default_factory=dict)
+
+
+class LifecycleExtension(Protocol):
+    def initialize(self) -> bool: ...
+    def shutdown(self) -> bool: ...
+    def health_check(self) -> dict[str, Any]: ...
+    def is_available(self) -> bool: ...
 
 
 class GmailExtension(Protocol):
