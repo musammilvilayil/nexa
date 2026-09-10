@@ -12,8 +12,12 @@ from .contracts import PolicyDecision, PolicyOutcome, RiskTier
 DEFAULT_DENY_PATTERNS: tuple[str, ...] = (
     r"\bformat\s+[a-z]:",                     # format C:
     r"\brm\s+(-\w+\s+)*-rf\s+/",             # rm -rf / (with optional extra flags)
-    r"\bdel\s+/s\s+/q\s+[a-z]:\\",            # del /s /q C:\...
-    r"\brmdir\s+/s\s+/q\s+[a-z]:\\",          # rmdir /s /q C:\...
+    r"\bdel\s+(/[a-z]\s+)*[a-z]:\\",          # del /s /q C:\... or del /q /s
+    r"\brmdir\s+(/[a-z]\s+)*[a-z]:\\",        # rmdir /s /q C:\...
+    r"\brd\s+(/[a-z]\s+)*[a-z]:\\",           # rd /s /q C:\...
+    r"\bremove-item\s+.*[a-z]:\\windows\b",   # PowerShell Remove-Item
+    r"\bdelete\s+(?:the\s+)?windows\s+(?:system\s+)?directory\b", # natural language
+    r"\bdelete\s+(?:the\s+)?system\s+directory\b",
     r"\bmkfs\b",                               # mkfs (Linux format)
     r"\bshutdown\s+[/-][srf]",                # shutdown /s, -s, /r, -r, /f, -f
     r"\breg\s+delete\s+hk",                   # registry deletion

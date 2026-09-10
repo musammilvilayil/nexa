@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import re
+import time
 from typing import Any, Mapping
 
 from core.contracts import ExecutionResult, OperationSpec, RiskTier, SkillMatch, SkillMetadata
@@ -32,7 +34,7 @@ class AppSkill:
         )
 
     def match(self, text: str, context: Mapping[str, Any]) -> SkillMatch | None:
-        text = text.strip()
+        text = text.strip().rstrip(".!?")
         
         # Launch matches
         match = _LAUNCH_RE.fullmatch(text)
@@ -97,10 +99,21 @@ class AppSkill:
     ) -> ExecutionResult:
         if operation == "launch":
             res = self._launcher.launch(params["app_name"])
-            if res["success"]:
-                return ExecutionResult(True, res["message"], data=res)
-            else:
+            if not res["success"]:
                 return ExecutionResult(False, res["message"], error=res["message"])
+            
+            # Action -> Verify expected state
+            app_obj = res.get("app")
+            verified = False
+            if app_obj:
+                for _ in range(4):
+                    time.sleep(0.3)
+                    if self._launcher.is_running(app_obj.name):
+                        verified = True
+                        break
+            if verified:
+                return ExecutionResult(True, f"Launched {app_obj.name} and verified process is running", data=res)
+            return ExecutionResult(True, res["message"], data=res)
         elif operation == "list_apps":
             apps = self._launcher.registry.list_apps()
             data = [{"name": a.name, "executable": a.executable} for a in apps]
@@ -111,7 +124,19 @@ class AppSkill:
                 return ExecutionResult(True, f"Found {app.name}", data={"name": app.name, "executable": app.executable})
             return ExecutionResult(False, f"App '{params['app_name']}' not found")
         elif operation == "close_app":
-            # For now just mock it or return failure since closing is not fully implemented in launcher
-            return ExecutionResult(False, "Close app not fully implemented yet", error="not implemented")
+            app = self._launcher.registry.find(params["app_name"])
+            if not app:
+                return ExecutionResult(False, f"App '{params['app_name']}' not found in registry", error="not found")
+            import subprocess
+            exe_name = os.path.basename(app.executable)
+            if not exe_name.lower().endswith(".exe"):
+                exe_name += ".exe"
+            try:
+                sub_res = subprocess.run(["taskkill", "/IM", exe_name, "/F"], capture_output=True, text=True)
+                if sub_res.returncode == 0:
+                    return ExecutionResult(True, f"Closed {app.name}", data={"output": sub_res.stdout.strip()})
+                return ExecutionResult(False, f"Could not close {app.name}: {sub_res.stderr.strip() or 'Process may not be running'}", error=sub_res.stderr.strip())
+            except Exception as exc:
+                return ExecutionResult(False, f"Failed to close {app.name}: {exc}", error=str(exc))
             
         return ExecutionResult(False, "Unknown operation", error="unknown")

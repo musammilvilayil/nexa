@@ -67,6 +67,8 @@ class NexaRuntime:
     browser_skill: BrowserSkill | None = None
     terminal_skill: TerminalSkill | None = None
     app_skill: AppSkill | None = None
+    task_planner: Any | None = None
+    plan_executor: Any | None = None
 
 
 def _workspace_roots() -> tuple[Path, ...]:
@@ -268,7 +270,29 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
     provider_registry = ProviderRegistry()
 
     # ── Computer-Use Skills ───────────────────────────────────────────
-    computer_skill = ComputerSkill(failsafe=failsafe)
+    from computer.screen import ScreenCapture
+    from computer.mouse import MouseController
+    from computer.keyboard import KeyboardController
+    from computer.clipboard import ClipboardManager
+    from computer.window import WindowManager
+    from computer.vision import ScreenAnalyzer
+
+    screen = ScreenCapture(failsafe=failsafe)
+    mouse = MouseController(failsafe=failsafe)
+    keyboard = KeyboardController(failsafe=failsafe)
+    clipboard = ClipboardManager()
+    window_manager = WindowManager()
+    screen_analyzer = ScreenAnalyzer()
+
+    computer_skill = ComputerSkill(
+        failsafe=failsafe,
+        screen=screen,
+        mouse=mouse,
+        keyboard=keyboard,
+        clipboard=clipboard,
+        window_manager=window_manager,
+        screen_analyzer=screen_analyzer,
+    )
     registry.register(computer_skill)
 
     browser_skill = BrowserSkill()
@@ -309,6 +333,12 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
     context_bus.set_environment_flag("browser_available", True)
     context_bus.set_environment_flag("terminal_available", True)
 
+    from planner.task_planner import TaskPlanner
+    from planner.executor import PlanExecutor
+
+    task_planner = TaskPlanner(registry=registry, capability_manager=capability_manager)
+    plan_executor = PlanExecutor(kernel_process=kernel.process)
+
     return NexaRuntime(
         kernel=kernel,
         registry=registry,
@@ -333,6 +363,8 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
         browser_skill=browser_skill,
         terminal_skill=terminal_skill,
         app_skill=app_skill,
+        task_planner=task_planner,
+        plan_executor=plan_executor,
     )
 
 

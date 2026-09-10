@@ -111,7 +111,7 @@ class TerminalSkill:
         # Direct command patterns
         m = _PATTERNS["run"].match(text_stripped)
         if m:
-            command = m.group(1).strip()
+            command = m.group(1).strip().rstrip(".")
             if not command:
                 return None
             op, risk = self._classify_command(command)
@@ -173,14 +173,26 @@ class TerminalSkill:
                     error="Empty command after parsing",
                 )
 
-            result = self._bridge.run(
-                args=parts,
-                timeout=timeout,
-            )
+            try:
+                result = self._bridge.run(
+                    executable=parts[0],
+                    args=parts[1:],
+                    timeout=timeout,
+                )
+            except TypeError:
+                result = self._bridge.run(
+                    args=parts,
+                    timeout=timeout,
+                )
 
-            stdout = self._truncate(result.get("stdout", ""))
-            stderr = self._truncate(result.get("stderr", ""))
-            exit_code = result.get("returncode", -1)
+            if isinstance(result, dict):
+                stdout = self._truncate(result.get("stdout", ""))
+                stderr = self._truncate(result.get("stderr", ""))
+                exit_code = result.get("returncode", -1)
+            else:
+                stdout = self._truncate(getattr(result, "stdout", ""))
+                stderr = self._truncate(getattr(result, "stderr", ""))
+                exit_code = getattr(result, "returncode", -1)
 
             if exit_code == 0:
                 return ExecutionResult(

@@ -7,15 +7,18 @@ from browser.engine import BrowserEngine
 from browser.navigator import WebNavigator
 from core import ExecutionResult, OperationSpec, RiskTier, SkillMatch, SkillMetadata
 
-# open: `open (.+)`, `browse (.+)`, `go to (.+)`, `/browser open (.+)`, `browser open cheythu (.+) open cheyy`
+# open: `open (https?://...|www....|domain.tld)`, `browse (.+)`, `go to (.+)`, `/browser open (.+)`, `browser open cheythu (.+) open cheyy`
 _OPEN_RE = re.compile(
-    r"^(?:open\s+(.+)|browse\s+(.+)|go\s+to\s+(.+)|/browser\s+open\s+(.+)|browser\s+open\s+cheythu\s+(.+)\s+open\s+cheyy)$",
+    r"^(?:open\s+(https?://\S+|www\.\S+|[a-zA-Z0-9_\-]+\.[a-z]{2,}(?:/\S*)?)|browse\s+(.+)|go\s+to\s+(.+)|/browser\s+open\s+(.+)|browser\s+open\s+cheythu\s+(.+)\s+open\s+cheyy)$",
     re.IGNORECASE
 )
 
 # search: `search (?:google |web )?(?:for )?(.+)`, `google search (.+)`, `/search (.+)`, `google il (.+) search cheyy`
 _SEARCH_RE = re.compile(
-    r"^(?:search\s+(?:google\s+|web\s+)?(?:for\s+)?(.+)|google\s+search\s+(.+)|/search\s+(.+)|google\s+il\s+(.+)\s+search\s+cheyy)$",
+    r"^(?:search\s+(?:google\s+|web\s+)?(?:for\s+)?(.+)|google\s+search\s+(.+)|/search\s+(.+)|"
+    r"open\s+(?:chrome|browser)\s+and\s+search\s+(?:google\s+|web\s+)?(?:for\s+)?(.+)|"
+    r"chrome\s+open\s+cheyth[u]?\s+google(?:-|\s+)?il\s+(.+)\s+search\s+cheyy[u]?|"
+    r"google(?:-|\s+)?il\s+(.+)\s+search\s+cheyy[u]?)$",
     re.IGNORECASE
 )
 
@@ -74,18 +77,18 @@ class BrowserSkill:
         )
 
     def match(self, text: str, context: Mapping[str, Any]) -> SkillMatch | None:
-        normalized = text.strip()
+        normalized = text.strip().rstrip(".!?")
         
+        match = _SEARCH_RE.fullmatch(normalized)
+        if match:
+            query = next(g for g in match.groups() if g is not None).strip()
+            return SkillMatch("browser", "search", {"query": query})
+
         match = _OPEN_RE.fullmatch(normalized)
         if match:
             # Find the first non-None group
             url = next(g for g in match.groups() if g is not None).strip()
             return SkillMatch("browser", "open", {"url": url})
-            
-        match = _SEARCH_RE.fullmatch(normalized)
-        if match:
-            query = next(g for g in match.groups() if g is not None).strip()
-            return SkillMatch("browser", "search", {"query": query})
             
         match = _CLICK_RE.fullmatch(normalized)
         if match:
@@ -128,6 +131,9 @@ class BrowserSkill:
             url = str(params.get("url", "")).strip()
             if not url:
                 raise ValueError("URL cannot be empty")
+            lower_url = url.lower()
+            if lower_url.startswith(("file:", "javascript:", "data:", "about:")):
+                raise ValueError(f"Blocked unsafe URL scheme: {url}")
             return {"url": url}
             
         if operation == "search":
@@ -184,9 +190,11 @@ class BrowserSkill:
                 result = self.engine.close()
                 return ExecutionResult(success=result.success, message=result.message, error=result.error)
                 
-            # Requires launched browser
+            # Requires launched browser - auto-launch on demand if available
             if not self.engine.is_launched and operation not in ("launch", "close_browser"):
-                return ExecutionResult(False, "Browser is not launched", error="browser not launched")
+                launch_res = self.engine.launch()
+                if not launch_res.success:
+                    return ExecutionResult(False, f"Browser is not launched: {launch_res.error or launch_res.message}", error=launch_res.error)
                 
             if operation == "open":
                 result = self.navigator.open_url(params["url"])

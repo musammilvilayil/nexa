@@ -224,6 +224,12 @@ class SQLiteAuditLedger:
             return {str(item_key): self._safe(item, key=str(item_key)) for item_key, item in value.items()}
         if isinstance(value, (tuple, list, set)):
             return [self._safe(item) for item in value]
-        if value is None or isinstance(value, (str, int, float, bool)):
+        if isinstance(value, str):
+            import re
+            redacted = re.sub(r"(bearer\s+)[A-Za-z0-9_\-\.]+", r"\1<redacted>", value, flags=re.IGNORECASE)
+            redacted = re.sub(r"(api[_-]?key\s*[:=]\s*)[A-Za-z0-9_\-\.]+", r"\1<redacted>", redacted, flags=re.IGNORECASE)
+            redacted = re.sub(r"(password\s*[:=]\s*)\S+", r"\1<redacted>", redacted, flags=re.IGNORECASE)
+            return redacted
+        if value is None or isinstance(value, (int, float, bool)):
             return value
         return repr(value)

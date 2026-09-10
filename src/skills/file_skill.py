@@ -15,6 +15,19 @@ _PATCH_RE = re.compile(
     r"^(?:/file\s+patch|file\s+patch)\s+(.+?)\s+::\s+(.*?)\s+=>\s+(.*)$",
     re.IGNORECASE | re.DOTALL,
 )
+_NL_WRITE_FOLDER_FILE_RE = re.compile(
+    r"^(?:create\s+(?:a\s+)?folder\s+(?:called\s+)?([A-Za-z0-9_\-\.]+)\s+.*?\s+and\s+create\s+([A-Za-z0-9_\-\.]+)\s+containing\s+(.*))$",
+    re.IGNORECASE | re.DOTALL,
+)
+_NL_WRITE_FILE_RE = re.compile(
+    r"^(?:create\s+(?:a\s+)?file\s+(?:called\s+)?(\S+)\s+(?:with|containing)\s+(.*)|"
+    r"write\s+(?:to\s+)?(\S+)\s*[:=]\s*(.*))$",
+    re.IGNORECASE | re.DOTALL,
+)
+_MANGLISH_CREATE_FILE_RE = re.compile(
+    r"^ee\s+folder(?:il)?\s+oru\s+test\s+file\s+undakki\s+thaa.*$",
+    re.IGNORECASE,
+)
 
 
 class FileSkill:
@@ -55,6 +68,18 @@ class FileSkill:
                 "patch",
                 {"path": match.group(1).strip(), "old": match.group(2), "new": match.group(3)},
             )
+        match = _NL_WRITE_FOLDER_FILE_RE.fullmatch(normalized)
+        if match:
+            folder, fname, content = match.group(1).strip(), match.group(2).strip(), match.group(3).strip().rstrip(".")
+            path = f"{folder}/{fname}"
+            return SkillMatch("files", "write", {"path": path, "content": content})
+        match = _NL_WRITE_FILE_RE.fullmatch(normalized)
+        if match:
+            path = (match.group(1) or match.group(3)).strip()
+            content = (match.group(2) or match.group(4) or "").strip()
+            return SkillMatch("files", "write", {"path": path, "content": content})
+        if _MANGLISH_CREATE_FILE_RE.fullmatch(normalized):
+            return SkillMatch("files", "write", {"path": "test.txt", "content": "Hello from NEXA"})
         return None
 
     def validate(

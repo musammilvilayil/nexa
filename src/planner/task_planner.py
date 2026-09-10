@@ -1,9 +1,11 @@
 from __future__ import annotations
-from typing import Any
+import re
 import uuid
 from datetime import datetime
+from typing import Any
 
 from planner.contracts import TaskPlan, PlanStep
+
 
 class TaskPlanner:
     """Decomposes complex user requests into multi-step skill execution plans.
@@ -25,50 +27,62 @@ class TaskPlanner:
         self._capability_manager = capability_manager
     
     def plan(self, request: str, context: dict[str, Any] | None = None) -> TaskPlan:
-        """Create an execution plan for a user request.
-        
-        Steps:
-        1. Check if a single skill can handle it (simple case)
-        2. Check if known multi-step patterns match
-        3. Decompose into steps based on identified skills
-        """
-        steps = self._detect_multi_step(request)
+        """Create an execution plan for a user request."""
+        steps = self._detect_multi_step(request, context)
         if not steps:
-            # Create a simple single step plan
-            steps = [PlanStep(
-                step_id=1,
-                description=request,
-                skill_name="unknown",
-                operation="unknown"
-            )]
+            found = self._find_skill_for_step(request, context)
+            if found:
+                skill_name, op, params = found
+                steps = [PlanStep(
+                    step_id=1,
+                    description=request,
+                    skill_name=skill_name,
+                    operation=op,
+                    params=params,
+                )]
+            else:
+                steps = [PlanStep(
+                    step_id=1,
+                    description=request,
+                    skill_name="unknown",
+                    operation="unknown",
+                )]
             
         return TaskPlan(
             plan_id=str(uuid.uuid4()),
             description=request,
             steps=steps,
             original_request=request,
-            created_at=datetime.utcnow().isoformat()
+            created_at=datetime.utcnow().isoformat(),
         )
     
-    def _detect_multi_step(self, request: str) -> list[PlanStep] | None:
-        """Detect if request requires multiple steps using pattern matching.
-        
-        Known patterns:
-        - 'search ... and save': browser.search + file.write
-        - 'download ... and extract': browser.download + file capability
-        - 'open ... and type': app.launch + keyboard.type
-        - 'screenshot and analyze': computer.screenshot + vision.analyze  
-        """
-        if " and " in request.lower():
-            # Dummy pattern matching for test
-            return [
-                PlanStep(step_id=1, description="step 1", skill_name="dummy", operation="op1"),
-                PlanStep(step_id=2, description="step 2", skill_name="dummy", operation="op2", depends_on=(1,))
-            ]
+    def _detect_multi_step(self, request: str, context: dict[str, Any] | None = None) -> list[PlanStep] | None:
+        """Detect if request requires multiple steps using pattern matching and skill resolution."""
+        req_lower = request.lower()
+        if " and " in req_lower or " then " in req_lower:
+            parts = [p.strip() for p in re.split(r"\s+(?:and\s+then|and|then)\s+", request, flags=re.IGNORECASE) if p.strip()]
+            if len(parts) >= 2:
+                steps = []
+                for idx, part in enumerate(parts, 1):
+                    found = self._find_skill_for_step(part, context)
+                    skill_name = found[0] if found else "dummy"
+                    op = found[1] if found else f"op{idx}"
+                    params = found[2] if found else {}
+                    steps.append(PlanStep(
+                        step_id=idx,
+                        description=part,
+                        skill_name=skill_name,
+                        operation=op,
+                        params=params,
+                        depends_on=(idx - 1,) if idx > 1 else (),
+                    ))
+                return steps
         return None
     
-    def _find_skill_for_step(self, step_description: str) -> tuple[str, str, dict[str, Any]] | None:
-        """Find a skill and operation that can handle a step description.
-        Returns (skill_name, operation, params) or None.
-        """
+    def _find_skill_for_step(self, step_description: str, context: dict[str, Any] | None = None) -> tuple[str, str, dict[str, Any]] | None:
+        """Find a skill and operation that can handle a step description."""
+        if self._registry is not None:
+            match = self._registry.resolve(step_description, context or {})
+            if match is not None:
+                return (match.skill_name, match.operation, dict(match.params))
         return None

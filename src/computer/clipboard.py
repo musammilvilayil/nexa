@@ -46,10 +46,12 @@ class ClipboardManager:
         try:
             user32.EmptyClipboard()
             count = len(text) + 1
-            handle = kernel32.GlobalAlloc(0x0042, count * ctypes.sizeof(ctypes.c_wchar))
+            size = count * ctypes.sizeof(ctypes.c_wchar)
+            handle = kernel32.GlobalAlloc(0x0042, size)
             pcontents = kernel32.GlobalLock(handle)
             try:
-                ctypes.memmove(pcontents, text, count * ctypes.sizeof(ctypes.c_wchar))
+                buf = ctypes.create_unicode_buffer(text, count)
+                ctypes.memmove(pcontents, buf, size)
             finally:
                 kernel32.GlobalUnlock(handle)
             user32.SetClipboardData(13, handle)  # CF_UNICODETEXT

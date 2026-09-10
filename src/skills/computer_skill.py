@@ -42,7 +42,9 @@ class ComputerSkill:
         window_manager: WindowManager | None = None,
         screen_analyzer: ScreenAnalyzer | None = None,
     ):
-        self._failsafe = failsafe
+        from core.failsafe import FailsafeMonitor as CoreFailsafe
+
+        self._failsafe = failsafe or CoreFailsafe()
         self._screen = screen
         self._mouse = mouse
         self._keyboard = keyboard
@@ -169,14 +171,17 @@ class ComputerSkill:
         try:
             valid_params = self.validate(operation, params, context)
             
-            if self._failsafe:
-                self._failsafe.check_before_action() # this should check before action, mock can override
-
+            self._failsafe.check_before_action()
             if operation == "screenshot":
                 if not self._screen:
                     raise RuntimeError("ScreenCapture module not available")
                 data = self._screen.capture()
-                return ExecutionResult(success=True, message="Screenshot captured", data={"bytes": data})
+                msg = "Screenshot captured"
+                if self._screen_analyzer and self._screen_analyzer.is_available:
+                    analysis = self._screen_analyzer.analyze(data, prompt=valid_params.get("prompt", "Describe what is currently visible."))
+                    if analysis.description:
+                        msg = f"Screenshot captured: {analysis.description}"
+                return ExecutionResult(success=True, message=msg, data={"bytes": data})
 
             elif operation == "find_element":
                 if not self._screen or not self._screen_analyzer:

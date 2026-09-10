@@ -53,7 +53,7 @@ class PlanExecutor:
         return PlanResult(
             plan=plan,
             success=success,
-            message="Plan execution finished",
+            message="Plan execution finished" if success else f"Plan failed: {'; '.join(errors)}",
             completed_steps=completed,
             total_steps=len(plan.steps),
             errors=tuple(errors)
@@ -66,10 +66,15 @@ class PlanExecutor:
         while step.retry_count <= step.max_retries:
             try:
                 if self._kernel_process:
-                    req_str = f"Execute {step.skill_name}.{step.operation} with {step.params}"
-                    result = self._kernel_process(req_str)
+                    # Pass the step description to kernel
+                    cmd = step.description
+                    result = self._kernel_process(cmd)
                     if result == "FAIL":
                         raise Exception("Kernel execution failed")
+                    if hasattr(result, "status"):
+                        if result.status not in ("success", "ok"):
+                            err_msg = result.message if hasattr(result, "message") else "Execution failed"
+                            raise Exception(err_msg)
                     step.result = result
                 else:
                     step.result = "Success"

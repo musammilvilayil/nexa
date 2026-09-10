@@ -1,15 +1,20 @@
 from __future__ import annotations
+import re
 import time
 
 from computer.contracts import FailsafeMonitor
+from core.failsafe import FailsafeMonitor as CoreFailsafe
 
 
 class KeyboardController:
     def __init__(self, failsafe: FailsafeMonitor | None = None):
-        self._failsafe = failsafe
+        self._failsafe = failsafe or CoreFailsafe()
         self._pynput_keyboard = None
         self._controller = None
-        self._secret_patterns = ["KEY", "SECRET", "PASSWORD", "TOKEN"]
+        self._secret_patterns = (
+            re.compile(r"(?:api[_-]?key|secret|password|bearer|token)\s*[:=]\s*\S+", re.IGNORECASE),
+            re.compile(r"\b(?:sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,})\b"),
+        )
 
     def _get_controller(self):
         if self._controller is None:
@@ -23,13 +28,12 @@ class KeyboardController:
 
     def _check_secrets(self, text: str) -> None:
         text_upper = text.upper()
-        for pattern in self._secret_patterns:
+        for pattern in ["KEY", "SECRET", "PASSWORD", "TOKEN"]:
             if pattern in text_upper:
                 raise ValueError(f"Blocked attempt to type potential secret/password: matches '{pattern}'.")
 
     def type_text(self, text: str, interval: float = 0.05) -> None:
-        if self._failsafe:
-            self._failsafe.check_before_action()
+        self._failsafe.check_before_action()
         self._check_secrets(text)
         
         ctrl = self._get_controller()
@@ -39,8 +43,7 @@ class KeyboardController:
                 time.sleep(interval)
 
     def press(self, key: str) -> None:
-        if self._failsafe:
-            self._failsafe.check_before_action()
+        self._failsafe.check_before_action()
         
         ctrl = self._get_controller()
         try:
@@ -52,16 +55,18 @@ class KeyboardController:
         ctrl.release(k)
 
     def hotkey(self, *keys: str) -> None:
-        if self._failsafe:
-            self._failsafe.check_before_action()
+        self._failsafe.check_before_action()
             
         ctrl = self._get_controller()
         parsed_keys = []
         for k in keys:
-            try:
-                parsed_keys.append(getattr(self._pynput_keyboard.Key, k))
-            except AttributeError:
-                parsed_keys.append(k)
+            subkeys = k.split("+") if "+" in k else [k]
+            for sk in subkeys:
+                sk_clean = sk.strip().lower()
+                try:
+                    parsed_keys.append(getattr(self._pynput_keyboard.Key, sk_clean))
+                except AttributeError:
+                    parsed_keys.append(sk_clean)
 
         for k in parsed_keys:
             ctrl.press(k)
@@ -69,8 +74,7 @@ class KeyboardController:
             ctrl.release(k)
 
     def key_down(self, key: str) -> None:
-        if self._failsafe:
-            self._failsafe.check_before_action()
+        self._failsafe.check_before_action()
             
         ctrl = self._get_controller()
         try:
@@ -80,8 +84,7 @@ class KeyboardController:
         ctrl.press(k)
 
     def key_up(self, key: str) -> None:
-        if self._failsafe:
-            self._failsafe.check_before_action()
+        self._failsafe.check_before_action()
             
         ctrl = self._get_controller()
         try:
