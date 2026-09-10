@@ -5,10 +5,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from core import ContextBus, NexaKernel, SQLiteAuditLedger, SkillRegistry
+from core.security import SecurityGate
+from core.failsafe import FailsafeMonitor, FailsafeConfig
 from capabilities import CapabilityManager, CapabilityStore
+from providers.registry import ProviderRegistry
 from skills.file_skill import FileSkill
 from skills.git_plugin import GitPlugin
 from skills.github_skill import GitHubSkill
+from skills.computer_skill import ComputerSkill
+from skills.browser_skill import BrowserSkill
+from skills.terminal_skill import TerminalSkill
+from skills.app_skill import AppSkill
 from skills.trading import (
     AdaptiveStrategyRouter,
     BrokerAdapter,
@@ -53,6 +60,13 @@ class NexaRuntime:
     live_controller: LiveExecutionController | None
     capability_manager: CapabilityManager | None = None
     capability_store: CapabilityStore | None = None
+    security_gate: SecurityGate | None = None
+    failsafe: FailsafeMonitor | None = None
+    provider_registry: ProviderRegistry | None = None
+    computer_skill: ComputerSkill | None = None
+    browser_skill: BrowserSkill | None = None
+    terminal_skill: TerminalSkill | None = None
+    app_skill: AppSkill | None = None
 
 
 def _workspace_roots() -> tuple[Path, ...]:
@@ -229,6 +243,46 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
     # Load all previously persisted capabilities into the registry
     capability_manager.load_all_into_registry(registry)
 
+    # ── Security Gate (expanded with deny list and CRITICAL tier) ────
+    blocked_processes_raw = os.getenv("NEXA_BLOCKED_PROCESSES", "").strip()
+    blocked_processes = frozenset(
+        p.strip() for p in blocked_processes_raw.split(",") if p.strip()
+    ) if blocked_processes_raw else frozenset()
+
+    security_gate = SecurityGate(
+        critical_cooldown_seconds=_float_env("NEXA_CRITICAL_COOLDOWN_SECONDS", 5.0),
+    )
+
+    # ── Failsafe Monitor ─────────────────────────────────────────────
+    failsafe_config = FailsafeConfig(
+        corner_enabled=_bool_env("NEXA_FAILSAFE_CORNER", True),
+        corner_threshold_px=_int_env("NEXA_FAILSAFE_CORNER_PX", 5),
+        max_actions_per_second=_float_env("NEXA_FAILSAFE_MAX_ACTIONS", 10.0),
+        action_timeout_seconds=_float_env("NEXA_FAILSAFE_TIMEOUT", 30.0),
+        blocked_processes=blocked_processes,
+        cooldown_after_trigger_seconds=_float_env("NEXA_FAILSAFE_COOLDOWN", 5.0),
+    )
+    failsafe = FailsafeMonitor(failsafe_config)
+
+    # ── Provider Registry ─────────────────────────────────────────────
+    provider_registry = ProviderRegistry()
+
+    # ── Computer-Use Skills ───────────────────────────────────────────
+    computer_skill = ComputerSkill(failsafe=failsafe)
+    registry.register(computer_skill)
+
+    browser_skill = BrowserSkill()
+    registry.register(browser_skill)
+
+    terminal_skill = TerminalSkill(
+        timeout=_float_env("NEXA_TERMINAL_TIMEOUT", 60.0),
+    )
+    registry.register(terminal_skill)
+
+    app_skill = AppSkill()
+    registry.register(app_skill)
+
+    # ── Kernel ────────────────────────────────────────────────────────
     audit_path = Path(
         os.getenv("NEXA_AUDIT_DB", str(PROJECT_ROOT / "data" / "actions.db"))
     ).expanduser().resolve()
@@ -236,6 +290,7 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
     kernel = NexaKernel(
         registry=registry,
         context_bus=context_bus,
+        security_gate=security_gate,
         audit_ledger=audit,
         capability_manager=capability_manager,
         pending_ttl_seconds=_float_env("NEXA_PENDING_TTL_SECONDS", 300.0),
@@ -249,6 +304,10 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
     context_bus.set_environment_flag("paper_state_persistent", True)
     context_bus.set_environment_flag("paper_evidence_persistent", True)
     context_bus.set_environment_flag("capabilities_persistent", True)
+    context_bus.set_environment_flag("failsafe_enabled", True)
+    context_bus.set_environment_flag("computer_use_available", True)
+    context_bus.set_environment_flag("browser_available", True)
+    context_bus.set_environment_flag("terminal_available", True)
 
     return NexaRuntime(
         kernel=kernel,
@@ -267,6 +326,13 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
         live_controller=live_controller,
         capability_manager=capability_manager,
         capability_store=capability_store,
+        security_gate=security_gate,
+        failsafe=failsafe,
+        provider_registry=provider_registry,
+        computer_skill=computer_skill,
+        browser_skill=browser_skill,
+        terminal_skill=terminal_skill,
+        app_skill=app_skill,
     )
 
 

@@ -213,6 +213,9 @@ def _skills_reply(runtime) -> str:
             "- Teacher-Student Language Layer [active]",
             "- Gemini/Ollama training bridges [available when configured]",
             "- Self-Extending Capability Forge [active]",
+            "- Failsafe Monitor [active]",
+            "- Provider Registry [active]",
+            "- Task Planner [active]",
         ]
     )
     return "\n".join(lines)
@@ -320,8 +323,11 @@ def main():
     messages.extend(load_recent_messages(limit=12))
 
     print(
-        "NEXA ONLINE - Kernel + Memory + Teacher-Student + Workspace/File/Git/GitHub/Trading/Capabilities enabled.\n"
-        "Commands: /skills, /capabilities, /pending, /confirm <id>, /cancel <id>, /teacher-stats, /training-status, /exit.\n"
+        "NEXA ONLINE - Kernel + Memory + Teacher-Student + "
+        "Workspace/File/Git/GitHub/Trading/Capabilities + "
+        "Computer/Browser/Terminal/Apps enabled.\n"
+        "Commands: /skills, /capabilities, /pending, /confirm <id>, "
+        "/cancel <id>, /failsafe, /status, /teacher-stats, /training-status, /exit.\n"
     )
 
     while True:
@@ -342,6 +348,46 @@ def main():
             continue
         if lowered == "/capabilities":
             print(f"\nNEXA: {_capabilities_reply(runtime)}\n")
+            continue
+        if lowered == "/failsafe":
+            if runtime.failsafe is not None:
+                state = runtime.failsafe.state
+                status = "STOPPED" if state.stopped else "ACTIVE"
+                reason = f" ({state.reason.value})" if state.reason else ""
+                print(f"\nNEXA: Failsafe Monitor: {status}{reason}")
+                print(f"  Corner detection: {'enabled' if runtime.failsafe.config.corner_enabled else 'disabled'}")
+                print(f"  Max actions/sec: {runtime.failsafe.config.max_actions_per_second}")
+                if state.stopped:
+                    print("  Use /failsafe-reset to reset.\n")
+                else:
+                    print()
+            else:
+                print("\nNEXA: Failsafe monitor not initialized.\n")
+            continue
+        if lowered == "/failsafe-reset":
+            if runtime.failsafe is not None:
+                runtime.failsafe.reset()
+                print("\nNEXA: Failsafe monitor reset. Actions are now allowed.\n")
+            else:
+                print("\nNEXA: Failsafe monitor not initialized.\n")
+            continue
+        if lowered == "/status":
+            skills_count = len(runtime.registry.list_metadata())
+            caps_count = 0
+            if getattr(runtime, "capability_store", None) is not None:
+                caps_count = len(runtime.capability_store.list_capabilities())
+            failsafe_status = "ACTIVE"
+            if runtime.failsafe is not None and runtime.failsafe.is_stopped:
+                failsafe_status = "STOPPED"
+            lines = [
+                "NEXA System Status:",
+                f"  Registered skills: {skills_count}",
+                f"  Dynamic capabilities: {caps_count}",
+                f"  Failsafe: {failsafe_status}",
+                f"  Security deny-list: {len(runtime.security_gate._deny_patterns) if runtime.security_gate else 0} patterns",
+                f"  Pending actions: {len(runtime.kernel.pending_actions())}",
+            ]
+            print(f"\nNEXA: " + "\n".join(lines) + "\n")
             continue
         if lowered == "/pending":
             print(f"\nNEXA: {_pending_reply(runtime)}\n")

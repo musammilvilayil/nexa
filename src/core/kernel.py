@@ -78,6 +78,26 @@ class NexaKernel:
         self._expire_pending()
         snapshot = self.context_bus.snapshot()
         context = snapshot.as_mapping()
+
+        # Pre-filter: check deny list before any skill matching
+        deny_decision = self.security_gate.check_deny_list(text)
+        if deny_decision is not None:
+            action_id = uuid4().hex[:12]
+            self._record_safely(
+                action_id=action_id,
+                skill_name="<denied>",
+                operation="<denied>",
+                params={"text": text},
+                risk=RiskTier.CRITICAL,
+                status=AuditStatus.DENIED,
+                error=deny_decision.reason,
+            )
+            return KernelResponse(
+                status="denied",
+                message=deny_decision.reason,
+                action_id=action_id,
+            )
+
         match = self.registry.resolve(text, context)
 
         if match is None and self.capability_manager is not None:

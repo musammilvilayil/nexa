@@ -10,6 +10,7 @@ class RiskTier(str, Enum):
     MUTATE = "mutate"
     REMOTE = "remote"
     DESTRUCTIVE = "destructive"
+    CRITICAL = "critical"
 
 
 class PolicyOutcome(str, Enum):
