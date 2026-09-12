@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 from bridges import OllamaBridge, OllamaBridgeError
@@ -316,6 +317,10 @@ def _pending_reply(runtime) -> str:
 
 
 def main():
+    if "--ui" in sys.argv:
+        from ui.launcher import main as ui_main
+        sys.exit(ui_main())
+
     init_db()
     runtime = build_runtime()
 
@@ -326,7 +331,7 @@ def main():
         "NEXA ONLINE - Level-5 Autonomous Personal AI Operating System\n"
         "Extensions + MCP + OAuth Handoff + Long-Running Tasks + Persistent Scheduler + "
         "Multi-Agent + 10-Layer Memory + Deep Research + Observability.\n"
-        "Commands: /status, /skills, /extensions, /mcp, /mcp-status, /memory-status, "
+        "Commands: /ui, /status, /skills, /extensions, /mcp, /mcp-status, /memory-status, "
         "/activity, /health, /tasks, /failsafe, /pending, /confirm <id>, /cancel <id>, /exit.\n"
     )
 
@@ -337,6 +342,12 @@ def main():
         if lowered in {"/exit", "exit", "quit"}:
             print("NEXA: Shutting down.")
             break
+        if lowered in {"/ui", "/desktop-ui", "/gui"}:
+            import subprocess
+            launcher_script = Path(__file__).resolve().parent / "ui" / "launcher.py"
+            subprocess.Popen([sys.executable, str(launcher_script)])
+            print("\nNEXA: Desktop UI launched at http://127.0.0.1:8765/\n")
+            continue
         if lowered == "/teacher-stats":
             _print_teacher_stats()
             continue
@@ -432,15 +443,23 @@ def main():
             continue
         if lowered.startswith("/confirm "):
             action_id = user.split(maxsplit=1)[1].strip()
-            response = runtime.kernel.confirm(action_id)
-            reply = _kernel_reply(response)
+            if getattr(runtime, "control", None) is not None:
+                c_res = runtime.control.confirm_plan_or_action(action_id)
+                reply = c_res.get("message", "Confirmed.")
+            else:
+                response = runtime.kernel.confirm(action_id)
+                reply = _kernel_reply(response)
             save_message("user", user)
             _record_reply(messages, user, reply)
             continue
         if lowered.startswith("/cancel "):
             action_id = user.split(maxsplit=1)[1].strip()
-            response = runtime.kernel.cancel(action_id)
-            reply = _kernel_reply(response)
+            if getattr(runtime, "control", None) is not None:
+                c_res = runtime.control.cancel_plan_or_action(action_id)
+                reply = c_res.get("message", "Cancelled.")
+            else:
+                response = runtime.kernel.cancel(action_id)
+                reply = _kernel_reply(response)
             save_message("user", user)
             _record_reply(messages, user, reply)
             continue
@@ -598,22 +617,30 @@ def main():
         if not user:
             continue
 
-        response = runtime.kernel.process(user)
-        if response.status != "no_match":
-            reply = _kernel_reply(response)
-            save_message("user", user)
-            _record_reply(messages, user, reply)
-            continue
-
-        # Multi-step task planning before conversational fallback
-        if runtime.task_planner is not None and runtime.plan_executor is not None:
-            task_plan = runtime.task_planner.plan(user)
-            if len(task_plan.steps) > 1 or (len(task_plan.steps) == 1 and task_plan.steps[0].skill_name != "unknown"):
-                plan_res = runtime.plan_executor.execute(task_plan)
-                reply = plan_res.message
+        if getattr(runtime, "control", None) is not None:
+            cmd_res = runtime.control.execute_pipeline(user)
+            if cmd_res.get("status") not in {"conversation", "no_match"}:
+                reply = cmd_res.get("message", "")
                 save_message("user", user)
                 _record_reply(messages, user, reply)
                 continue
+        else:
+            response = runtime.kernel.process(user)
+            if response.status != "no_match":
+                reply = _kernel_reply(response)
+                save_message("user", user)
+                _record_reply(messages, user, reply)
+                continue
+
+            # Multi-step task planning before conversational fallback
+            if runtime.task_planner is not None and runtime.plan_executor is not None:
+                task_plan = runtime.task_planner.plan(user)
+                if len(task_plan.steps) > 1 or (len(task_plan.steps) == 1 and task_plan.steps[0].skill_name != "unknown"):
+                    plan_res = runtime.plan_executor.execute(task_plan)
+                    reply = plan_res.message
+                    save_message("user", user)
+                    _record_reply(messages, user, reply)
+                    continue
 
         save_message("user", user)
 

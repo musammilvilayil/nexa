@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NEXA — Autonomous Personal AI OS</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="nexa-app-container">
+    
+    <!-- LEFT SIDEBAR -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">
+          <div class="pulse-ring"></div>
+          <span class="logo-symbol">◈</span>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">NEXA</span>
+          <span class="brand-sub">LEVEL 5 OS</span>
+        </div>
+      </div>
+
+      <button class="new-task-btn" id="btn-new-task">
+        <span class="plus-icon">+</span>
+        <span>New Task</span>
+      </button>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-view="chat">
+          <span class="nav-icon">💬</span>
+          <span class="nav-label">Chat & Agent</span>
+        </button>
+        <button class="nav-item" data-view="tasks">
+          <span class="nav-icon">📋</span>
+          <span class="nav-label">Tasks</span>
+          <span class="badge" id="badge-tasks">0</span>
+        </button>
+        <button class="nav-item" data-view="memory">
+          <span class="nav-icon">🧠</span>
+          <span class="nav-label">Memory</span>
+        </button>
+        <button class="nav-item" data-view="extensions">
+          <span class="nav-icon">🧩</span>
+          <span class="nav-label">Extensions</span>
+        </button>
+        <button class="nav-item" data-view="mcp">
+          <span class="nav-icon">🔌</span>
+          <span class="nav-label">MCP Tools</span>
+          <span class="badge" id="badge-mcp">0</span>
+        </button>
+        <button class="nav-item" data-view="scheduler">
+          <span class="nav-icon">⏱</span>
+          <span class="nav-label">Scheduler</span>
+        </button>
+        <button class="nav-item" data-view="activity">
+          <span class="nav-icon">📊</span>
+          <span class="nav-label">Activity</span>
+        </button>
+        <button class="nav-item" data-view="training">
+          <span class="nav-icon">🎯</span>
+          <span class="nav-label">Training</span>
+          <span class="badge" id="badge-training">6075</span>
+        </button>
+        <button class="nav-item" data-view="settings">
+          <span class="nav-icon">⚙</span>
+          <span class="nav-label">Settings</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-chats-container">
+        <div class="sidebar-section-header">
+          <span>RECENT CHATS</span>
+        </div>
+        <div class="recent-chats-list" id="recent-chats-list">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="status-indicator-pill">
+          <span class="dot pulse-green"></span>
+          <span id="sidebar-status-text">NEXA READY</span>
+        </div>
+        <button class="theme-toggle-btn" id="btn-theme-toggle" title="Toggle Theme">🌓</button>
+      </div>
+    </aside>
+
+    <!-- CENTER MAIN VIEW -->
+    <main class="main-content">
+      
+      <!-- CHAT VIEW -->
+      <section class="view-panel active" id="view-chat">
+        
+        <!-- STARTUP PROGRESS BANNER (Dynamic) -->
+        <div class="startup-banner" id="startup-banner">
+          <div class="startup-content">
+            <div class="startup-spinner"></div>
+            <div class="startup-info">
+              <div class="startup-title" id="startup-title">NEXA LEVEL 5 OS — ONLINE</div>
+              <div class="startup-steps" id="startup-steps">Memory loaded ✓ | Extensions active ✓ | MCP tools gated ✓ | SecurityGate strict ✓</div>
+            </div>
+          </div>
+          <button class="banner-dismiss" onclick="document.getElementById('startup-banner').style.display='none'">✕</button>
+        </div>
+
+        <!-- LIVE TASK PROGRESS CARD -->
+        <div class="live-task-card hidden" id="live-task-card">
+          <div class="task-card-header">
+            <div class="task-badge">
+              <span class="dot-spinner"></span>
+              <span id="task-badge-state">RUNNING</span>
+            </div>
+            <div class="task-title" id="task-card-title">Storage Audit Analysis</div>
+            <div class="task-pct" id="task-card-pct">0%</div>
+          </div>
+          
+          <div class="progress-bar-container">
+            <div class="progress-bar-fill" id="task-card-bar" style="width: 0%;"></div>
+          </div>
+
+          <div class="task-card-details">
+            <div class="task-detail-row">
+              <span class="detail-label">Current:</span>
+              <span class="detail-val" id="task-current-step">Initializing inspection...</span>
+            </div>
+            <div class="task-detail-row">
+              <span class="detail-label">Completed:</span>
+              <span class="detail-val text-green" id="task-completed-steps">None</span>
+            </div>
+            <div class="task-detail-row">
+              <span class="detail-label">Next:</span>
+              <span class="detail-val text-muted" id="task-next-step">Analyze file allocations</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- CONFIRMATION ACTION CARD -->
+        <div class="confirmation-card hidden" id="confirmation-card">
+          <div class="confirm-header">
+            <span class="confirm-icon">⚠</span>
+            <div class="confirm-heading">
+              <h3>Confirmation Required</h3>
+              <p>SecurityGate blocked an action requiring human authorization</p>
+            </div>
+            <span class="risk-badge" id="confirm-risk-badge">CRITICAL</span>
+          </div>
+
+          <div class="confirm-body">
+            <div class="confirm-field">
+              <span class="field-label">Action:</span>
+              <span class="field-value" id="confirm-action-name">-</span>
+            </div>
+            <div class="confirm-field">
+              <span class="field-label">Target / Parameters:</span>
+              <pre class="field-pre" id="confirm-params-json">{}</pre>
+            </div>
+          </div>
+
+          <div class="confirm-actions">
+            <button class="btn-secondary" id="btn-confirm-cancel">Cancel Action</button>
+            <button class="btn-primary-danger" id="btn-confirm-accept">
+              <span id="confirm-btn-text">Authorize & Execute</span>
+              <span class="confirm-timer" id="confirm-cooldown-timer"></span>
+            </button>
+          </div>
+        </div>
+
+        <!-- CONVERSATION / FEED -->
+        <div class="conversation-feed" id="conversation-feed">
+          <!-- Messages will be progressively injected here -->
+          <div class="message nexa-message">
+            <div class="message-avatar">◈</div>
+            <div class="message-bubble">
+              <p>Hello! I am <strong>NEXA</strong>, your Level-5 Autonomous Personal AI Operating System.</p>
+              <p class="text-secondary">I can control your desktop, automate browsers, run safe storage audits, execute research, and manage your long-running tasks. How can I help you today?</p>
+              <div class="quick-prompts">
+                <button class="prompt-chip" onclick="window.sendPrompt('Analyze my storage on C: and D:')">📁 Storage Audit (C: & D:)</button>
+                <button class="prompt-chip" onclick="window.sendPrompt('Open Chrome and search for Python 3.14 features')">🌐 Open Chrome & Search</button>
+                <button class="prompt-chip" onclick="window.sendPrompt('/status')">📊 Check OS Status</button>
+                <button class="prompt-chip" onclick="window.sendPrompt('Chrome open cheyy')">🗣 Manglish: Chrome Open Cheyy</button>
+              </div>
+            </div>
+            <span class="message-time">Ready</span>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- TASKS VIEW -->
+      <section class="view-panel" id="view-tasks">
+        <div class="panel-header">
+          <h2>Task Management</h2>
+          <span class="panel-sub">Persistent checkpoints, recovery & background task control</span>
+        </div>
+        <div class="table-container">
+          <table class="data-table" id="tasks-table">
+            <thead>
+              <tr>
+                <th>Task ID</th>
+                <th>Goal</th>
+                <th>State</th>
+                <th>Progress</th>
+                <th>Started</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="tasks-tbody">
+              <tr><td colspan="6" class="text-center">Loading tasks...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- MEMORY VIEW -->
+      <section class="view-panel" id="view-memory">
+        <div class="panel-header">
+          <h2>10-Layer Unified Memory</h2>
+          <span class="panel-sub">Episodic, Semantic, Procedural, and contextual memory layers (Zero credentials stored)</span>
+        </div>
+        <div class="memory-grid" id="memory-grid">
+          <!-- Memory layers loaded dynamically -->
+        </div>
+      </section>
+
+      <!-- EXTENSIONS VIEW -->
+      <section class="view-panel" id="view-extensions">
+        <div class="panel-header">
+          <h2>Lifecycle Extensions</h2>
+          <span class="panel-sub">Active modular Level 5 extensions</span>
+        </div>
+        <div class="cards-grid" id="extensions-grid"></div>
+      </section>
+
+      <!-- MCP VIEW -->
+      <section class="view-panel" id="view-mcp">
+        <div class="panel-header">
+          <h2>Model Context Protocol (MCP)</h2>
+          <span class="panel-sub">Gated external tools with strict SecurityGate risk evaluation</span>
+        </div>
+        <div class="cards-grid" id="mcp-grid"></div>
+      </section>
+
+      <!-- SCHEDULER VIEW -->
+      <section class="view-panel" id="view-scheduler">
+        <div class="panel-header">
+          <h2>Persistent Task Scheduler</h2>
+          <span class="panel-sub">Interval, daily, weekly, and cron jobs surviving restarts</span>
+        </div>
+        <div class="cards-grid" id="scheduler-grid">
+          <div class="info-card">
+            <h3>Scheduler Active</h3>
+            <p>SQLite-backed background task scheduler is monitoring scheduled execution triggers.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ACTIVITY VIEW -->
+      <section class="view-panel" id="view-activity">
+        <div class="panel-header">
+          <h2>Audit & Activity Timeline</h2>
+          <span class="panel-sub">Observability ledger tracking action telemetry, latencies, and security decisions</span>
+        </div>
+        <div class="activity-stream" id="activity-stream"></div>
+      </section>
+
+      <!-- TRAINING VIEW -->
+      <section class="view-panel" id="view-training">
+        <div class="panel-header">
+          <h2>Autonomous Training & Self-Improvement Mission</h2>
+          <span class="panel-sub">Closed-loop 6,000+ benchmark, failure diagnosis, auto-repair, and capability acquisition</span>
+        </div>
+
+        <div class="training-controls-bar" style="display: flex; gap: 10px; margin-bottom: 20px;">
+          <button class="ctrl-btn btn-green" id="btn-training-start">▶ Start Training</button>
+          <button class="ctrl-btn" id="btn-training-pause">⏸ Pause</button>
+          <button class="ctrl-btn" id="btn-training-resume">▶ Resume</button>
+          <button class="ctrl-btn btn-red" id="btn-training-stop">⏹ Stop</button>
+          <button class="ctrl-btn" id="btn-training-pilot" style="margin-left: auto;">🎯 Run 100-Task Pilot</button>
+        </div>
+
+        <div class="training-stats-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px;">
+          <div class="telemetry-card">
+            <div class="telemetry-header"><span>PROGRESS</span></div>
+            <div style="font-size: 24px; font-weight: bold; margin-top: 8px;" id="training-stat-progress">0%</div>
+            <div style="font-size: 12px; color: var(--text-sub);" id="training-stat-count">0 / 6075 Tasks</div>
+          </div>
+          <div class="telemetry-card">
+            <div class="telemetry-header"><span>PASS RATE</span></div>
+            <div style="font-size: 24px; font-weight: bold; color: var(--green); margin-top: 8px;" id="training-stat-rate">100%</div>
+            <div style="font-size: 12px; color: var(--text-sub);"><span id="training-stat-passed" class="text-green">0</span> passed | <span id="training-stat-failed" class="text-red">0</span> failed</div>
+          </div>
+          <div class="telemetry-card">
+            <div class="telemetry-header"><span>RECOVERIES</span></div>
+            <div style="font-size: 24px; font-weight: bold; color: var(--cyan); margin-top: 8px;" id="training-stat-recovered">0</div>
+            <div style="font-size: 12px; color: var(--text-sub);">Self-healed via retries</div>
+          </div>
+          <div class="telemetry-card">
+            <div class="telemetry-header"><span>CAPABILITIES MASTERED</span></div>
+            <div style="font-size: 24px; font-weight: bold; color: var(--orange); margin-top: 8px;" id="training-stat-skills">0</div>
+            <div style="font-size: 12px; color: var(--text-sub);"><span id="training-stat-bugs">0</span> bugs fixed</div>
+          </div>
+        </div>
+
+        <div class="telemetry-card" style="margin-bottom: 20px;">
+          <div class="telemetry-header"><span>CURRENT TASK IN EXECUTION</span></div>
+          <div style="margin-top: 10px; font-size: 14px;">
+            <div><strong>Task:</strong> <span id="training-curr-task">Ready to train</span></div>
+            <div style="margin-top: 4px;"><strong>Category:</strong> <span id="training-curr-category">-</span></div>
+            <div style="margin-top: 4px;"><strong>Status:</strong> <span id="training-curr-status" class="text-green">IDLE</span></div>
+            <div style="margin-top: 4px; font-size: 12px; color: var(--text-sub);" id="training-curr-details">Select 'Start Training' or 'Run 100-Task Pilot' to begin.</div>
+          </div>
+        </div>
+
+        <div class="telemetry-card">
+          <div class="telemetry-header"><span>LIVE TRAINING EVENT STREAM</span></div>
+          <div class="training-event-stream" id="training-event-stream" style="max-height: 250px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 12px; margin-top: 10px; display: flex; flex-direction: column; gap: 6px;"></div>
+        </div>
+      </section>
+
+      <!-- SETTINGS VIEW -->
+      <section class="view-panel" id="view-settings">
+        <div class="panel-header">
+          <h2>System Settings & Controls</h2>
+          <span class="panel-sub">Security policies, startup configuration, and voice preferences</span>
+        </div>
+        <div class="settings-form">
+          <div class="setting-item">
+            <div class="setting-info">
+              <h4>Start with Windows</h4>
+              <p>Automatically launch NEXA in the background upon Windows login</p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="chk-autostart">
+              <span class="slider round"></span>
+            </label>
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-info">
+              <h4>Failsafe Emergency Stop</h4>
+              <p>Controls the non-bypassable hardware failsafe monitor</p>
+            </div>
+            <div class="btn-group">
+              <button class="btn-danger" id="btn-settings-stop">Emergency Halt</button>
+              <button class="btn-secondary" id="btn-settings-reset">Reset Failsafe</button>
+            </div>
+          </div>
+
+          <div class="setting-item">
+            <div class="setting-info">
+              <h4>Voice Feedback</h4>
+              <p>Read responses aloud with TTS (English / Malayalam)</p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="chk-voice-tts" checked>
+              <span class="slider round"></span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- BOTTOM CONTROL BAR -->
+      <footer class="bottom-bar">
+        <div class="input-container">
+          <div class="voice-wave-container hidden" id="voice-wave">
+            <div class="wave-bar"></div>
+            <div class="wave-bar"></div>
+            <div class="wave-bar"></div>
+            <div class="wave-bar"></div>
+            <div class="wave-bar"></div>
+          </div>
+          
+          <div class="chat-mode-bar">
+            <button class="mode-chip active" data-mode="auto" title="Automatically route between conversational chat and desktop agent">✨ Auto</button>
+            <button class="mode-chip" data-mode="chat" title="Chat-only mode: Ask questions, get explanations, brainstorm">💬 Chat</button>
+            <button class="mode-chip" data-mode="agent" title="Agent mode: Real computer use, app control, browsing, files">🤖 Agent</button>
+          </div>
+
+          <textarea
+            class="command-input"
+            id="command-input"
+            rows="1"
+            placeholder="Ask NEXA anything or give a command (e.g. 'Analyze my storage on C: and D:' or 'Chrome open cheyy')..."
+          ></textarea>
+
+          <div class="bottom-actions">
+            <!-- Voice Button with multi-states -->
+            <button class="mic-btn idle" id="btn-mic" title="Voice Input (Click or Push-to-Talk)">
+              <span class="mic-icon">🎙</span>
+              <span class="mic-label" id="mic-label">Voice</span>
+            </button>
+
+            <!-- Emergency Stop Button -->
+            <button class="stop-btn" id="btn-stop" title="Emergency Stop (Halt all automation)">
+              <span>⏹ STOP</span>
+            </button>
+
+            <!-- Send Button -->
+            <button class="send-btn" id="btn-send" title="Send Command">
+              <span>➤</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="bottom-status-strip">
+          <div class="voice-controls">
+            <button class="voice-ctrl-btn" id="btn-voice-mute" title="Mute/Unmute Speech">🔊 Sound On</button>
+            <span class="voice-tts-status" id="voice-tts-status">Standby</span>
+          </div>
+          <div class="system-mini-stats" id="system-mini-stats">
+            <span>C: SSD 55.6 GB Free</span>
+            <span class="sep">•</span>
+            <span>D: HDD 930.9 GB Free</span>
+            <span class="sep">•</span>
+            <span>SecurityGate: Strict</span>
+          </div>
+        </div>
+      </footer>
+
+    </main>
+
+    <!-- RIGHT PANEL (Live System Telemetry) -->
+    <aside class="right-panel">
+      <div class="panel-title">LIVE SYSTEM TELEMETRY</div>
+
+      <div class="telemetry-card">
+        <div class="telemetry-header">
+          <span>NEXA KERNEL</span>
+          <span class="status-badge green" id="badge-online">ONLINE</span>
+        </div>
+        <div class="telemetry-row">
+          <span>SecurityGate</span>
+          <span class="text-green" id="telemetry-secgate">STRICT (5 Tiers)</span>
+        </div>
+        <div class="telemetry-row">
+          <span>Failsafe Monitor</span>
+          <span class="text-green" id="telemetry-failsafe">ACTIVE</span>
+        </div>
+        <div class="telemetry-row">
+          <span>Browser Engine</span>
+          <span class="text-blue" id="telemetry-browser">Chromium Ready</span>
+        </div>
+        <div class="telemetry-row">
+          <span>Voice Pipeline</span>
+          <span class="text-cyan" id="telemetry-voice">STT / TTS Ready</span>
+        </div>
+        <div class="telemetry-row">
+          <span>Gemini / LLM</span>
+          <span class="text-purple" id="telemetry-llm">Standby / Fallback</span>
+        </div>
+      </div>
+
+      <!-- CPU & RAM -->
+      <div class="telemetry-card">
+        <div class="telemetry-header">
+          <span>HARDWARE UTILIZATION</span>
+        </div>
+        
+        <div class="meter-group">
+          <div class="meter-label">
+            <span>CPU</span>
+            <span id="meter-cpu-val">4 Cores</span>
+          </div>
+          <div class="meter-bar-track">
+            <div class="meter-bar-fill" id="meter-cpu-bar" style="width: 25%;"></div>
+          </div>
+        </div>
+
+        <div class="meter-group">
+          <div class="meter-label">
+            <span>RAM</span>
+            <span id="meter-ram-val">8.0 / 16.0 GB (50%)</span>
+          </div>
+          <div class="meter-bar-track">
+            <div class="meter-bar-fill meter-cyan" id="meter-ram-bar" style="width: 50%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STORAGE DRIVES (C: SSD and D: HDD) -->
+      <div class="telemetry-card">
+        <div class="telemetry-header">
+          <span>STORAGE DRIVES</span>
+        </div>
+
+        <div class="meter-group">
+          <div class="meter-label">
+            <span>C: SSD (System)</span>
+            <span id="meter-ssd-val">55.6 GB Free (23%)</span>
+          </div>
+          <div class="meter-bar-track">
+            <div class="meter-bar-fill meter-orange" id="meter-ssd-bar" style="width: 77%;"></div>
+          </div>
+        </div>
+
+        <div class="meter-group">
+          <div class="meter-label">
+            <span>D: HDD (Mass Storage)</span>
+            <span id="meter-hdd-val">931.0 GB Free (99%)</span>
+          </div>
+          <div class="meter-bar-track">
+            <div class="meter-bar-fill meter-green" id="meter-hdd-bar" style="width: 1%;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MULTI-AGENT WORKERS HIERARCHY -->
+      <div class="telemetry-card">
+        <div class="telemetry-header">
+          <span>MULTI-AGENT WORKERS</span>
+          <span class="badge" id="badge-agents">7</span>
+        </div>
+        <ul class="agent-tree" id="agent-tree">
+          <li class="agent-node supervisor">
+            <span class="node-icon">◈</span>
+            <span class="node-role">Supervisor</span>
+            <span class="node-state active">READY</span>
+          </li>
+          <li class="agent-node sub">
+            <span class="node-branch">├─</span>
+            <span class="node-role">Planner</span>
+            <span class="node-state" id="worker-planner">IDLE</span>
+          </li>
+          <li class="agent-node sub">
+            <span class="node-branch">├─</span>
+            <span class="node-role">Research</span>
+            <span class="node-state" id="worker-research">IDLE</span>
+          </li>
+          <li class="agent-node sub">
+            <span class="node-branch">├─</span>
+            <span class="node-role">Browser</span>
+            <span class="node-state" id="worker-browser">IDLE</span>
+          </li>
+          <li class="agent-node sub">
+            <span class="node-branch">├─</span>
+            <span class="node-role">Desktop</span>
+            <span class="node-state" id="worker-desktop">IDLE</span>
+          </li>
+          <li class="agent-node sub">
+            <span class="node-branch">├─</span>
+            <span class="node-role">Coder</span>
+            <span class="node-state" id="worker-coder">IDLE</span>
+          </li>
+          <li class="agent-node sub">
+            <span class="node-branch">├─</span>
+            <span class="node-role">Verifier</span>
+            <span class="node-state" id="worker-verifier">IDLE</span>
+          </li>
+          <li class="agent-node sub">
+            <span class="node-branch">└─</span>
+            <span class="node-role">Security</span>
+            <span class="node-state text-green" id="worker-security">STRICT</span>
+          </li>
+        </ul>
+      </div>
+
+    </aside>
+
+  </div>
+
+  <!-- TOAST CONTAINER -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

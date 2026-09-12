@@ -16,6 +16,7 @@ from .contracts import (
 )
 from .context import ContextBus, ContextSnapshot
 from .dispatcher import Dispatcher
+from .intent_router import IntentClassification, IntentRouter, IntentType
 from .kernel import KernelResponse, NexaKernel, PendingAction
 from .registry import SkillRegistry
 from .security import SecurityGate
@@ -28,6 +29,9 @@ __all__ = [
     "ContextSnapshot",
     "Dispatcher",
     "ExecutionResult",
+    "IntentClassification",
+    "IntentRouter",
+    "IntentType",
     "KernelResponse",
     "NexaKernel",
     "OperationSpec",

@@ -121,3 +121,37 @@ def verify_state_changed(before_observation: Any, after_observation: Any) -> boo
     if before_observation is None or after_observation is None:
         return True
     return before_observation != after_observation
+
+
+def verify_folder_exists(path: Path | str) -> bool:
+    """Verify that a directory exists on disk."""
+    p = Path(path).expanduser().resolve()
+    return p.is_dir()
+
+
+def verify_file_content(path: Path | str, expected_text: str) -> bool:
+    """Verify that a file contains expected text."""
+    p = Path(path).expanduser().resolve()
+    if not p.is_file():
+        return False
+    try:
+        content = p.read_text(encoding="utf-8")
+        return expected_text.lower() in content.lower()
+    except Exception:
+        return False
+
+
+def verify_file_size(path: Path | str, min_bytes: int = 1) -> bool:
+    """Verify that a file exists and has at least min_bytes."""
+    p = Path(path).expanduser().resolve()
+    return p.is_file() and p.stat().st_size >= min_bytes
+
+
+def verify_window_exists(title_pattern: str) -> bool:
+    """Verify that a visible window matching pattern exists."""
+    try:
+        from computer.window import WindowManager
+        wm = WindowManager()
+        return wm.find_window(title_pattern) is not None
+    except Exception:
+        return False

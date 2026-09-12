@@ -1,11 +1,19 @@
 .venv/
 __pycache__/
 *.pyc
-data/*.db
-data/generated_skills/
-data/capabilities/
 logs/
 .env
 .env.*
-data/market/*.csv
+
+# Runtime state and databases
+data/
+!data/.gitkeep
+
+# Temporary test outputs and scratch scripts
+test_output/
+scratch/
+test.txt
+
+# External third-party dependencies / cloned packages
+external/
 

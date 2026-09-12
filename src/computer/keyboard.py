@@ -32,8 +32,11 @@ class KeyboardController:
         return self._controller
 
     def _check_secrets(self, text: str) -> None:
+        for pat in self._secret_patterns:
+            if pat.search(text):
+                raise ValueError(f"Blocked attempt to type potential secret/password: matches secret pattern.")
         text_upper = text.upper()
-        for pattern in ["KEY", "SECRET", "PASSWORD", "TOKEN"]:
+        for pattern in ["SECRET_KEY", "API_KEY", "PASSWORD", "AUTH_TOKEN", "BEARER", "SECRET"]:
             if pattern in text_upper:
                 raise ValueError(f"Blocked attempt to type potential secret/password: matches '{pattern}'.")
 

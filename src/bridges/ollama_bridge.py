@@ -29,6 +29,14 @@ class OllamaBridge:
             raise ValueError("timeout must be positive")
         self.timeout = float(timeout)
 
+    def is_available(self, timeout: float = 0.3) -> bool:
+        """Quickly check if the local Ollama daemon is reachable."""
+        try:
+            r = httpx.get(f"{self.base_url}/api/tags", timeout=timeout)
+            return r.status_code == 200
+        except Exception:
+            return False
+
     def chat(
         self,
         messages: list[Mapping[str, str]],

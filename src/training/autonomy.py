@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Callable
 from uuid import uuid4
 
-from sqlite_utils import connect_sqlite
+try:
+    from sqlite_utils import connect_sqlite
+except ImportError:
+    from ..sqlite_utils import connect_sqlite
 
 from .candidate_store import CandidateStore
 from .curriculum import CurriculumModule, TradingCurriculum

@@ -23,6 +23,7 @@ DEFAULT_DENY_PATTERNS: tuple[str, ...] = (
     r"\breg\s+delete\s+hk",                   # registry deletion
     r"\bbcdedit\b",                            # boot config editing
     r"\bdiskpart\b",                           # disk partition tool
+    r":\(\)\s*\{",                             # bash fork bomb
 )
 
 

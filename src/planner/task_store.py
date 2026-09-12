@@ -123,6 +123,24 @@ class TaskStore:
             )
             return [self._row_to_record(row) for row in cur.fetchall()]
 
+    def pause_task(self, task_id: str) -> bool:
+        record = self.get_task(task_id)
+        if not record:
+            return False
+        record.state = "paused"
+        record.plan.status = PlanStatus.PAUSED
+        self.save_task(record)
+        return True
+
+    def resume_task(self, task_id: str) -> bool:
+        record = self.get_task(task_id)
+        if not record:
+            return False
+        record.state = "running"
+        record.plan.status = PlanStatus.IN_PROGRESS
+        self.save_task(record)
+        return True
+
     def cancel_task(self, task_id: str) -> bool:
         record = self.get_task(task_id)
         if not record:

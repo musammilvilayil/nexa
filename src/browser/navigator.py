@@ -70,3 +70,18 @@ class WebNavigator:
             return BrowserActionResult(success=False, error="Cannot scroll, page not available.")
         except Exception as e:
             return BrowserActionResult(success=False, error=f"Failed to scroll: {str(e)}")
+
+    def click_first_result(self) -> BrowserActionResult:
+        """Click the first non-ad search result."""
+        if not self._engine.is_launched:
+            return BrowserActionResult(success=False, error="Browser not launched.")
+        links = self._engine.extract_links()
+        for link in links:
+            u = link.url.lower()
+            if "google.com" not in u and (u.startswith("http://") or u.startswith("https://")):
+                return self.open_url(link.url)
+        for sel in ("a:has(h3)", "div.g a", "#search a"):
+            res = self._engine.click(sel)
+            if res.success:
+                return res
+        return BrowserActionResult(success=False, error="No search result link found")

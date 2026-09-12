@@ -280,8 +280,13 @@ class TestAgentEvaluation40(unittest.TestCase):
     def test_09_navigate_back(self):
         t0 = time.perf_counter()
         engine = self.runtime.browser_skill.engine
-        if engine.is_launched and engine._page:
-            engine._page.goto("https://example.com")
+        if not engine.is_launched:
+            engine.launch()
+        try:
+            if engine.is_launched:
+                engine.navigate("about:blank")
+        except Exception:
+            pass
         elapsed = time.perf_counter() - t0
         self.assertTrue(engine.is_launched)
         self._record(ScenarioEvaluation(

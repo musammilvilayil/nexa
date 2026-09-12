@@ -27,6 +27,14 @@ class CapabilityPlanner:
         re.IGNORECASE,
     )
 
+    STORAGE_AUDIT_RE = re.compile(
+        r"(?:storage\s+audit|audit\s+storage|analyze\s+storage|/storage\s+audit|storage_audit|"
+        r"analyze\s+(?:my\s+)?(?:c:?\s+and\s+d:?|drives?)|"
+        r"(?:recover|clean\s+up)\s+ssd\s+space|"
+        r"migrate\s+(?:files\s+from\s+c|c\s+to\s+d))",
+        re.IGNORECASE,
+    )
+
     def __init__(self, bridge: GeminiBridge | None = None) -> None:
         self.bridge = bridge
 
@@ -36,6 +44,38 @@ class CapabilityPlanner:
         context: Mapping[str, Any],
     ) -> CapabilityPlan | None:
         clean = " ".join(text.strip().split())
+        clean_lower = clean.lower()
+
+        # Check Storage Audit
+        if (
+            self.STORAGE_AUDIT_RE.search(clean)
+            or ("storage" in clean_lower and "audit" in clean_lower)
+            or ("c:" in clean_lower and "d:" in clean_lower and any(w in clean_lower for w in ("analyze", "move", "audit", "space", "ssd", "hdd", "migrate")))
+        ):
+            source_drive = "C:"
+            target_drive = "D:"
+            return CapabilityPlan(
+                capability_id="storage.audit",
+                name="storage_audit",
+                description="Safe read-only audit of storage drives (C: SSD and D: HDD) to classify data and identify safe relocations",
+                purpose="Performs a strictly read-only inspection of C: and D: drives, classifies system vs user directories, and calculates recoverable SSD space without modifying any files",
+                operation="audit",
+                risk_tier=RiskTier.READ,
+                intents=(
+                    "storage audit",
+                    "audit storage",
+                    "analyze storage",
+                    "storage_audit",
+                    "/storage audit",
+                    "analyze c: and d:",
+                    "recover ssd space",
+                ),
+                dependencies=("shutil", "pathlib", "os"),
+                extracted_params={
+                    "source_drive": source_drive,
+                    "target_drive": target_drive,
+                },
+            )
 
         # 1. Deterministic pattern checks
         # Check ZIP extraction

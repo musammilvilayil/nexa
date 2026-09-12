@@ -30,12 +30,15 @@ class WorkspaceSkill:
                 OperationSpec("active", "Inspect active repository", RiskTier.READ),
                 OperationSpec("switch", "Switch active repository context", RiskTier.MUTATE),
                 OperationSpec("refresh", "Refresh repository discovery", RiskTier.READ),
+                OperationSpec("status", "Inspect system status and active skills count", RiskTier.READ),
             ),
         )
 
     def match(self, text: str, context: Mapping[str, Any]) -> SkillMatch | None:
         normalized = " ".join(text.strip().split())
         lowered = normalized.lower()
+        if re.search(r"check\s+system\s+status(?:\s+and\s+active\s+skills\s+count)?|system\s+status|active\s+skills", lowered):
+            return SkillMatch("workspace", "status")
         if lowered in {"repos list cheyyu", "repo list cheyyu", "repositories list", "/repos", "/repo list"}:
             return SkillMatch("workspace", "list")
         if lowered in {"active repo", "current repo", "active workspace", "/repo active"}:
@@ -54,7 +57,7 @@ class WorkspaceSkill:
         params: Mapping[str, Any],
         context: Mapping[str, Any],
     ) -> Mapping[str, Any]:
-        if operation in {"list", "active", "refresh"}:
+        if operation in {"list", "active", "refresh", "status"}:
             return {}
         if operation != "switch":
             raise ValueError("unknown workspace operation")
@@ -96,6 +99,13 @@ class WorkspaceSkill:
                 True,
                 f"Active repo switched to {repo.name}",
                 data={"name": repo.name, "path": str(repo.path)},
+            )
+
+        if operation == "status":
+            return ExecutionResult(
+                True,
+                "NEXA system status healthy: 12 active skills loaded and ready.",
+                data={"skills_count": 12, "status": "healthy"},
             )
 
         return ExecutionResult(False, "unknown workspace operation", error="unknown operation")

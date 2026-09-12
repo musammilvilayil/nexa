@@ -42,6 +42,9 @@ from workspace import WorkspaceManager
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
+_RUNTIME_CONTROL_PLANES: dict[int, Any] = {}
+
+
 @dataclass(frozen=True)
 class NexaRuntime:
     kernel: NexaKernel
@@ -80,6 +83,14 @@ class NexaRuntime:
     multi_agent_extension: Any | None = None
     research_orchestrator: Any | None = None
     observability: Any | None = None
+
+    @property
+    def control(self) -> Any:
+        from control_plane import RuntimeControlPlane
+        rid = id(self)
+        if rid not in _RUNTIME_CONTROL_PLANES:
+            _RUNTIME_CONTROL_PLANES[rid] = RuntimeControlPlane(self)
+        return _RUNTIME_CONTROL_PLANES[rid]
 
 
 def _workspace_roots() -> tuple[Path, ...]:
@@ -270,7 +281,7 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
     failsafe_config = FailsafeConfig(
         corner_enabled=_bool_env("NEXA_FAILSAFE_CORNER", True),
         corner_threshold_px=_int_env("NEXA_FAILSAFE_CORNER_PX", 5),
-        max_actions_per_second=_float_env("NEXA_FAILSAFE_MAX_ACTIONS", 10.0),
+        max_actions_per_second=_float_env("NEXA_FAILSAFE_MAX_ACTIONS", 60.0),
         action_timeout_seconds=_float_env("NEXA_FAILSAFE_TIMEOUT", 30.0),
         blocked_processes=blocked_processes,
         cooldown_after_trigger_seconds=_float_env("NEXA_FAILSAFE_COOLDOWN", 5.0),
@@ -308,6 +319,16 @@ def build_runtime(*, live_broker: BrokerAdapter | None = None) -> NexaRuntime:
 
     browser_skill = BrowserSkill()
     registry.register(browser_skill)
+
+    try:
+        from skills.browser_control_skill import BrowserControlSkill
+        browser_control_skill = BrowserControlSkill(
+            security_gate=security_gate,
+            failsafe=failsafe,
+        )
+        registry.register(browser_control_skill)
+    except Exception as e:
+        logger.warning(f"Failed to register browser_control_skill: {e}")
 
     terminal_skill = TerminalSkill(
         timeout=_float_env("NEXA_TERMINAL_TIMEOUT", 60.0),

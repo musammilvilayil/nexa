@@ -38,7 +38,14 @@ class ClipboardManager:
         kernel32 = ctypes.windll.kernel32
         self._setup_ctypes(user32, kernel32)
         
-        if not user32.OpenClipboard(0):
+        import time
+        opened = False
+        for _ in range(10):
+            if user32.OpenClipboard(0):
+                opened = True
+                break
+            time.sleep(0.05)
+        if not opened:
             return ""
         try:
             if user32.IsClipboardFormatAvailable(13):  # CF_UNICODETEXT
@@ -71,7 +78,14 @@ class ClipboardManager:
         kernel32 = ctypes.windll.kernel32
         self._setup_ctypes(user32, kernel32)
         
-        if not user32.OpenClipboard(0):
+        import time
+        opened = False
+        for _ in range(10):
+            if user32.OpenClipboard(0):
+                opened = True
+                break
+            time.sleep(0.05)
+        if not opened:
             raise RuntimeError("Failed to open Windows clipboard")
         try:
             user32.EmptyClipboard()

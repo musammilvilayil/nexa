@@ -11,6 +11,7 @@ class PlanStatus(str, Enum):
     PARTIALLY_COMPLETED = "partially_completed"
     ROLLED_BACK = "rolled_back"
     CANCELLED = "cancelled"
+    PAUSED = "paused"
 
 class StepStatus(str, Enum):
     PENDING = "pending"

@@ -58,7 +58,7 @@ class CapabilityTester:
                 return CapabilityTestResult(
                     passed=False,
                     output=output,
-                    error=f"Unittest failed with exit code {proc.exit_code}",
+                    error=f"Unittest failed with exit code {proc.returncode}",
                 )
             except Exception as exc:
                 return CapabilityTestResult(

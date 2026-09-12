@@ -7,7 +7,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlite_utils import connect_sqlite
+try:
+    from sqlite_utils import connect_sqlite
+except ImportError:
+    from ..sqlite_utils import connect_sqlite
 
 from .trading_teacher import QuizQuestion, TradingLesson
 

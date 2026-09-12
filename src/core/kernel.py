@@ -228,6 +228,68 @@ class NexaKernel:
             confirmed=False,
         )
 
+    def execute_direct(
+        self,
+        skill_name: str,
+        operation: str,
+        params: Mapping[str, Any],
+        context: Mapping[str, Any] | None = None,
+        *,
+        auto_confirm: bool = True,
+    ) -> KernelResponse:
+        """Directly execute a resolved skill operation with full validation and security enforcement."""
+        self._expire_pending()
+        snapshot = self.context_bus.snapshot()
+        ctx = dict(snapshot.as_mapping())
+        if context:
+            ctx.update(context)
+
+        skill = self.registry.get(skill_name)
+        if skill is None:
+            return KernelResponse(status="error", message=f"Skill not found: {skill_name}")
+
+        spec = skill.metadata.operation(operation)
+        if spec is None:
+            return KernelResponse(status="error", message=f"Skill operation not found: {operation}")
+
+        action_id = uuid4().hex[:12]
+        try:
+            validated = self.dispatcher.validate(skill, operation, params, ctx)
+        except Exception as exc:
+            self._record_safely(
+                action_id=action_id,
+                skill_name=skill.metadata.name,
+                operation=operation,
+                params=params,
+                risk=spec.risk,
+                status=AuditStatus.VALIDATION_FAILED,
+                error=str(exc),
+            )
+            return KernelResponse(status="error", message=f"Validation failed: {exc}", action_id=action_id)
+
+        decision = self.security_gate.decide(spec.risk, confirmed=auto_confirm)
+        if decision.outcome == PolicyOutcome.DENY:
+            self._record_safely(
+                action_id=action_id,
+                skill_name=skill.metadata.name,
+                operation=operation,
+                params=validated,
+                risk=spec.risk,
+                status=AuditStatus.DENIED,
+                error=decision.reason,
+            )
+            return KernelResponse(status="denied", message=decision.reason, action_id=action_id)
+
+        return self._execute(
+            action_id=action_id,
+            skill_name=skill.metadata.name,
+            operation=operation,
+            params=validated,
+            snapshot=snapshot,
+            risk=spec.risk,
+            confirmed=auto_confirm,
+        )
+
     def confirm(self, action_id: str) -> KernelResponse:
         action = self._pending.pop(action_id.strip(), None)
         if action is None:

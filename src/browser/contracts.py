@@ -38,3 +38,27 @@ class BrowserActionResult:
     page: PageInfo | None = None
     data: Any = None
     error: str | None = None
+    action: str = ""
+    target: str = ""
+    observation: dict[str, Any] = field(default_factory=dict)
+    screenshot: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "success": self.success,
+            "action": self.action,
+            "target": self.target,
+            "observation": self.observation,
+            "error": self.error,
+            "screenshot": self.screenshot,
+            "metadata": self.metadata,
+            "message": self.message,
+            "page": {
+                "url": self.page.url,
+                "title": self.page.title,
+                "status_code": self.page.status_code,
+                "is_loaded": self.page.is_loaded,
+            } if self.page else None,
+            "data": self.data,
+        }

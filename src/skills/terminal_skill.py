@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import sys
+from pathlib import Path
 from typing import Any, Mapping
 
 from core.contracts import (
@@ -19,6 +21,7 @@ from bridges.subprocess_bridge import SubprocessBridge, SubprocessBridgeError
 SAFE_COMMANDS: frozenset[str] = frozenset({
     "dir", "ls", "echo", "type", "cat", "more", "head", "tail",
     "whoami", "hostname", "date", "time",
+    "get-date", "get-location", "get-process", "get-childitem", "get-command", "get-service",
     "python", "python3", "node", "npm", "npx",
     "git", "gh",
     "where", "which",
@@ -87,8 +90,23 @@ class TerminalSkill:
         self._max_output = max(1000, int(max_output_bytes))
         self._safe = SAFE_COMMANDS | (additional_safe_commands or frozenset())
         self._deny = DENY_COMMANDS | (additional_deny_commands or frozenset())
+
+        extra_allowed = {
+            "cmd", "cmd.exe",
+            "powershell", "powershell.exe",
+            "pwsh", "pwsh.exe",
+            "bash", "sh",
+            "ping", "ping.exe",
+            "python", "python.exe", "python3", "python3.exe",
+            Path(sys.executable).name.lower(),
+        }
+        for item in list(self._safe):
+            extra_allowed.add(item.lower())
+            if not item.lower().endswith(".exe"):
+                extra_allowed.add(f"{item.lower()}.exe")
+
         self._bridge = SubprocessBridge(
-            allowed_executables=list(self._safe | {"cmd", "powershell", "pwsh", "bash", "sh"}),
+            allowed_executables=list(extra_allowed),
             default_timeout=self._timeout,
             inherit_environment=False,
         )
@@ -108,6 +126,30 @@ class TerminalSkill:
     def match(self, text: str, context: Mapping[str, Any]) -> SkillMatch | None:
         text_stripped = text.strip()
 
+        # Terminal run command wrapped in quotes or explicit prefix
+        # e.g.: run terminal command 'echo 'Hello NEXA'' or run terminal command 'Get-Date'
+        m_tc = re.match(r"^run\s+terminal\s+command\s+['\"]?(.*?)['\"]?$", text_stripped, re.IGNORECASE)
+        if m_tc:
+            cmd_inner = m_tc.group(1).strip()
+            if (cmd_inner.startswith("'") and cmd_inner.endswith("'")) or (cmd_inner.startswith('"') and cmd_inner.endswith('"')):
+                cmd_inner = cmd_inner[1:-1].strip()
+            op, risk = self._classify_command(cmd_inner)
+            return SkillMatch(skill_name="terminal", operation=op, params={"command": cmd_inner}, confidence=0.95)
+
+        # Python execution: execute python code "..." or run python code "..."
+        m_py = re.match(r"^(?:execute|run)\s+python\s+code\s+['\"]?(.*?)['\"]?$", text_stripped, re.IGNORECASE | re.DOTALL)
+        if m_py:
+            code_inner = m_py.group(1).strip()
+            if (code_inner.startswith("'") and code_inner.endswith("'")) or (code_inner.startswith('"') and code_inner.endswith('"')):
+                code_inner = code_inner[1:-1].strip()
+            return SkillMatch(skill_name="terminal", operation="run_safe", params={"command": f'python -c "{code_inner}"', "python_code": code_inner}, confidence=0.95)
+
+        # Network diagnostics: check network connectivity and ping 127.0.0.1
+        m_ping = re.match(r"^(?:check\s+network\s+(?:connectivity\s+)?(?:and\s+)?ping\s+(\S+)|ping\s+(\S+))$", text_stripped, re.IGNORECASE)
+        if m_ping:
+            target = m_ping.group(1) or m_ping.group(2)
+            return SkillMatch(skill_name="terminal", operation="run_safe", params={"command": f"ping {target}"}, confidence=0.95)
+
         # Direct command patterns
         m = _PATTERNS["run"].match(text_stripped)
         if m:
@@ -121,6 +163,19 @@ class TerminalSkill:
                 params={"command": command},
                 confidence=0.9,
             )
+
+        m = _PATTERNS["run_safe"].match(text_stripped)
+        if m:
+            cand = m.group(1).strip().rstrip(".")
+            base = self._extract_base_command(cand).lower()
+            if base in self._safe and not any(w in cand.lower() for w in ("window", "file", "folder", "desktop", "repo")):
+                op, risk = self._classify_command(cand)
+                return SkillMatch(
+                    skill_name="terminal",
+                    operation=op,
+                    params={"command": cand},
+                    confidence=0.8,
+                )
 
         return None
 
@@ -173,17 +228,29 @@ class TerminalSkill:
                     error="Empty command after parsing",
                 )
 
-            try:
-                result = self._bridge.run(
-                    executable=parts[0],
-                    args=parts[1:],
-                    timeout=timeout,
-                )
-            except TypeError:
-                result = self._bridge.run(
-                    args=parts,
-                    timeout=timeout,
-                )
+            py_code = params.get("python_code")
+            base_low = parts[0].lower()
+            if py_code:
+                executable = sys.executable
+                args = ["-c", py_code]
+            elif os.name == "nt" and (base_low.startswith("get-") or base_low.startswith("set-") or base_low.startswith("select-") or base_low.startswith("where-")):
+                executable = "powershell.exe"
+                args = ["-NoProfile", "-Command", command]
+            elif os.name == "nt" and base_low in ("echo", "dir", "type", "cls", "vol", "ver", "copy", "del", "ren", "md", "rd"):
+                executable = "cmd.exe"
+                args = ["/c", command]
+            elif base_low in ("python", "python3"):
+                executable = sys.executable
+                args = parts[1:]
+            else:
+                executable = parts[0]
+                args = parts[1:]
+
+            result = self._bridge.run(
+                executable=executable,
+                args=args,
+                timeout=timeout,
+            )
 
             if isinstance(result, dict):
                 stdout = self._truncate(result.get("stdout", ""))

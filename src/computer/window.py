@@ -90,37 +90,86 @@ class WindowManager:
                 return w
         return None
 
-    def focus_window(self, handle: int) -> None:
-        self._ensure_desktop()
-        import ctypes
-        user32 = ctypes.windll.user32
-        user32.ShowWindow(handle, 9)  # SW_RESTORE
-        user32.BringWindowToTop(handle)
-        user32.SetForegroundWindow(handle)
+    def _resolve_handle(self, handle: int | str) -> int | None:
+        if isinstance(handle, int):
+            return handle
+        if isinstance(handle, str) and handle.strip():
+            w = self.find_window(handle.strip())
+            if w:
+                return w.handle
+        return None
 
-    def minimize(self, handle: int) -> None:
+    def focus_window(self, handle: int | str) -> bool:
         self._ensure_desktop()
+        hwnd = self._resolve_handle(handle)
+        if not hwnd:
+            return False
         import ctypes
         user32 = ctypes.windll.user32
-        user32.ShowWindow(handle, 6)  # SW_MINIMIZE
+        try:
+            fore_hwnd = user32.GetForegroundWindow()
+            fore_thread = user32.GetWindowThreadProcessId(fore_hwnd, None)
+            cur_thread = ctypes.windll.kernel32.GetCurrentThreadId()
+            if fore_thread != cur_thread:
+                user32.AttachThreadInput(fore_thread, cur_thread, True)
+            
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            user32.BringWindowToTop(hwnd)
+            user32.SetForegroundWindow(hwnd)
+            
+            if fore_thread != cur_thread:
+                user32.AttachThreadInput(fore_thread, cur_thread, False)
+            return True
+        except Exception:
+            try:
+                user32.ShowWindow(hwnd, 9)
+                user32.SetForegroundWindow(hwnd)
+                return True
+            except Exception:
+                return False
 
-    def maximize(self, handle: int) -> None:
-        self._ensure_desktop()
-        import ctypes
-        user32 = ctypes.windll.user32
-        user32.ShowWindow(handle, 3)  # SW_MAXIMIZE
+    def bring_to_front(self, handle: int | str) -> bool:
+        return self.focus_window(handle)
 
-    def restore(self, handle: int) -> None:
+    def minimize(self, handle: int | str) -> bool:
         self._ensure_desktop()
+        hwnd = self._resolve_handle(handle)
+        if not hwnd:
+            return False
         import ctypes
         user32 = ctypes.windll.user32
-        user32.ShowWindow(handle, 9)  # SW_RESTORE
+        user32.ShowWindow(hwnd, 6)  # SW_MINIMIZE
+        return True
 
-    def close(self, handle: int) -> None:
+    def maximize(self, handle: int | str) -> bool:
         self._ensure_desktop()
+        hwnd = self._resolve_handle(handle)
+        if not hwnd:
+            return False
         import ctypes
         user32 = ctypes.windll.user32
-        user32.PostMessageW(handle, 0x0010, 0, 0)  # WM_CLOSE
+        user32.ShowWindow(hwnd, 3)  # SW_MAXIMIZE
+        return True
+
+    def restore(self, handle: int | str) -> bool:
+        self._ensure_desktop()
+        hwnd = self._resolve_handle(handle)
+        if not hwnd:
+            return False
+        import ctypes
+        user32 = ctypes.windll.user32
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        return True
+
+    def close(self, handle: int | str) -> bool:
+        self._ensure_desktop()
+        hwnd = self._resolve_handle(handle)
+        if not hwnd:
+            return False
+        import ctypes
+        user32 = ctypes.windll.user32
+        user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+        return True
 
     def get_active_window(self) -> WindowInfo | None:
         self._ensure_desktop()

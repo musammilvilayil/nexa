@@ -24,8 +24,10 @@ class ScreenCapture:
                 raise RuntimeError("mss library is required for screen capture: pip install mss")
         return self._mss
 
-    def capture(self) -> bytes:
+    def capture(self, active_only: bool = False) -> bytes:
         """Convenience method returning raw screenshot bytes."""
+        if active_only:
+            return self.capture_active_window().image_bytes
         return self.capture_full().image_bytes
 
     def capture_full(self, monitor: int = 0) -> ScreenshotResult:
@@ -78,6 +80,26 @@ class ScreenCapture:
             )
         except Exception as exc:
             raise RuntimeError(f"Screen region capture failed: {exc}") from exc
+
+    def capture_active_window(self, window_manager: Any | None = None) -> ScreenshotResult:
+        """Capture screenshot of the currently active/foreground window."""
+        self._failsafe.check_before_action()
+        if window_manager is None:
+            try:
+                from computer.window import WindowManager
+                window_manager = WindowManager()
+            except Exception:
+                return self.capture_full()
+        try:
+            active = window_manager.get_active_window()
+            if not active or not active.rect:
+                return self.capture_full()
+            x, y, w, h = active.rect
+            if w <= 10 or h <= 10:
+                return self.capture_full()
+            return self.capture_region(max(0, x), max(0, y), w, h)
+        except Exception:
+            return self.capture_full()
 
     def compare_screenshots(self, before: bytes, after: bytes) -> float:
         self._failsafe.check_before_action()

@@ -40,15 +40,36 @@ class ApplicationRegistry:
     def find(self, query: str) -> AppInfo | None:
         """Find an app by name or alias (case-insensitive)."""
         q = query.strip().lower()
+        if not q:
+            return None
         # Direct name match
         if q in self._apps:
             return self._apps[q]
         # Alias match
         if q in self._aliases:
             return self._apps.get(self._aliases[q])
-        # Fuzzy: check if query is substring of any app name
+
+        # Strip common leading prefixes: "the ", "my ", "windows "
+        for prefix in ("the ", "my ", "windows "):
+            if q.startswith(prefix) and len(q) > len(prefix):
+                q_sub = q[len(prefix):].strip()
+                if q_sub in self._apps:
+                    return self._apps[q_sub]
+                if q_sub in self._aliases:
+                    return self._apps.get(self._aliases[q_sub])
+
+        # Strip common trailing suffixes: " app", " application", " editor"
+        for suffix in (" app", " application", " editor"):
+            if q.endswith(suffix) and len(q) > len(suffix):
+                q_sub = q[:-len(suffix)].strip()
+                if q_sub in self._apps:
+                    return self._apps[q_sub]
+                if q_sub in self._aliases:
+                    return self._apps.get(self._aliases[q_sub])
+
+        # Substring / fuzzy match
         for name, app in self._apps.items():
-            if q in name or any(q in alias.lower() for alias in app.aliases):
+            if q in name or any(q == alias.lower() or q in alias.lower() for alias in app.aliases):
                 return app
         return None
     
@@ -57,26 +78,78 @@ class ApplicationRegistry:
         return sorted(self._apps.values(), key=lambda a: a.name)
     
     def _register_defaults(self) -> None:
-        """Register well-known Windows applications."""
+        """Register well-known Windows applications with comprehensive aliases."""
         defaults = [
-            AppInfo("Chrome", "chrome", ("google chrome", "browser"), "browser"),
-            AppInfo("Edge", "msedge", ("microsoft edge",), "browser"),
-            AppInfo("Firefox", "firefox", (), "browser"),
-            AppInfo("VS Code", "code", ("vscode", "visual studio code"), "editor"),
-            AppInfo("Notepad", "notepad", ("notepad.exe",), "editor"),
+            AppInfo("Chrome", "chrome", ("google chrome", "browser", "web browser", "google browser", "internet"), "browser"),
+            AppInfo("Edge", "msedge", ("microsoft edge", "edge browser"), "browser"),
+            AppInfo("Firefox", "firefox", ("mozilla firefox",), "browser"),
+            AppInfo("VS Code", "code", ("vscode", "visual studio code", "code editor"), "editor"),
+            AppInfo("Notepad", "notepad", ("notepad.exe", "notebook", "text editor", "text editor app", "notes", "note"), "editor"),
             AppInfo("Notepad++", "notepad++", ("npp",), "editor"),
-            AppInfo("File Explorer", "explorer", ("explorer.exe", "files"), "system"),
+            AppInfo("File Explorer", "explorer", ("explorer.exe", "files", "file manager", "my computer", "this pc"), "system"),
             AppInfo("Terminal", "wt", ("windows terminal",), "terminal"),
             AppInfo("PowerShell", "powershell", ("pwsh", "ps"), "terminal"),
-            AppInfo("Command Prompt", "cmd", ("cmd.exe", "command prompt"), "terminal"),
+            AppInfo("Command Prompt", "cmd", ("cmd.exe", "command prompt", "terminal window"), "terminal"),
             AppInfo("Task Manager", "taskmgr", ("task manager",), "system"),
             AppInfo("Settings", "ms-settings:", ("windows settings",), "system"),
-            AppInfo("Calculator", "calc", ("calculator",), "utility"),
-            AppInfo("Paint", "mspaint", ("paint",), "utility"),
+            AppInfo("Calculator", "calc", ("calculator", "calc", "windows calculator", "calculator app", "calc.exe"), "utility"),
+            AppInfo("Paint", "mspaint", ("paint", "mspaint.exe", "drawing"), "utility"),
             AppInfo("Spotify", "spotify", (), "media"),
         ]
         for app in defaults:
             self.register(app)
+
+
+def resolve_executable(executable: str) -> str:
+    """Resolves an executable name to its full path if needed on Windows."""
+    import shutil
+    if os.path.isabs(executable) and os.path.isfile(executable):
+        return executable
+
+    which_path = shutil.which(executable)
+    if which_path:
+        return which_path
+
+    name_lower = executable.lower().replace(".exe", "")
+    known_paths = {
+        "chrome": [
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+        ],
+        "msedge": [
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe"),
+        ],
+        "firefox": [
+            r"C:\Program Files\Mozilla Firefox\firefox.exe",
+            r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe",
+        ],
+        "code": [
+            os.path.expandvars(r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe"),
+            r"C:\Program Files\Microsoft VS Code\Code.exe",
+        ],
+        "notepad": [
+            r"C:\Windows\System32\notepad.exe",
+            r"C:\Windows\notepad.exe",
+        ],
+        "calc": [
+            r"C:\Windows\System32\calc.exe",
+        ],
+        "mspaint": [
+            r"C:\Windows\System32\mspaint.exe",
+        ],
+        "taskmgr": [
+            r"C:\Windows\System32\Taskmgr.exe",
+        ],
+    }
+    if name_lower in known_paths:
+        for p in known_paths[name_lower]:
+            if os.path.isfile(p):
+                return p
+
+    return executable
 
 
 class ApplicationLauncher:
@@ -106,13 +179,18 @@ class ApplicationLauncher:
             }
         
         try:
-            cmd = [app.executable] + list(args)
+            exe_path = resolve_executable(app.executable)
+            cmd = [exe_path] + list(args)
             # Use shell=True for ms-settings: protocol and similar
             if app.executable.startswith("ms-") or "://" in app.executable:
                 subprocess.Popen(["start", "", app.executable], shell=True)
             else:
-                subprocess.Popen(cmd, shell=False,
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                try:
+                    subprocess.Popen(cmd, shell=False,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except FileNotFoundError:
+                    # Fallback to shell start
+                    subprocess.Popen(["start", "", app.executable] + list(args), shell=True)
             return {
                 "success": True,
                 "message": f"Launched {app.name}",
