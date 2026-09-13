@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
-class SkillInfo:
+class ServiceInfo:
     key: str
     name: str
     status: str
@@ -13,47 +14,27 @@ class SkillInfo:
     commands: tuple[str, ...] = ()
 
 
-INSTALLED_SKILLS = (
-    SkillInfo(
+# Non-plugin services only. Executable tool capabilities are no longer duplicated
+# here; the runtime core.SkillRegistry is the single source of truth for them.
+BUILTIN_SERVICES = (
+    ServiceInfo(
         key="memory",
         name="Personal Memory",
         status="active",
         description="Stores conversation history and selected personal facts in local SQLite memory.",
         commands=("remember facts", "recall stored facts"),
     ),
-    SkillInfo(
+    ServiceInfo(
         key="language",
         name="Teacher-Student Language Layer",
         status="active",
         description="Understands English, Malayalam and Manglish; unknown Manglish can be taught by Gemini and reused locally.",
         commands=("/teacher-stats",),
     ),
-    SkillInfo(
-        key="git",
-        name="Git Operator v1",
-        status="active",
-        description="Deterministic allow-listed Git operations with branch and conflict safety; no arbitrary shell execution.",
-        commands=(
-            "git status nokku",
-            "git pull cheyyu",
-            "changes nokku",
-            "ith stage cheyyu",
-            'commit message "..." vechu commit cheyyu',
-            "githubilek push cheyyu",
-            "current branch",
-            "recent commits",
-            "conflicts nokku",
-            "test-safe branch create cheyyu",
-            "main branchilek switch cheyyu",
-        ),
-    ),
 )
 
 
-# Accept the correct spelling (`skill`/`skills`) and the common user typo
-# (`skil`/`skils`) so the deterministic registry still catches the request.
 SKILL_WORD = r"(?:skills?|skils?)"
-
 SKILL_LIST_PATTERNS = (
     re.compile(r"^/skills$", re.IGNORECASE),
     re.compile(rf"^{SKILL_WORD}\s+list(?:\s+cheyyu|\s+cheythe|\s+cheyyamo)?$", re.IGNORECASE),
@@ -69,20 +50,29 @@ def is_skill_list_request(text: str) -> bool:
     return any(pattern.fullmatch(normalized) for pattern in SKILL_LIST_PATTERNS)
 
 
-def render_skill_list() -> str:
-    lines = ["NEXA installed/active skills:"]
-    for index, skill in enumerate(INSTALLED_SKILLS, start=1):
-        lines.append(f"{index}. {skill.name} [{skill.status}] - {skill.description}")
-        if skill.commands:
-            lines.append("   Commands: " + "; ".join(skill.commands))
+def render_skill_list(registry: Any | None = None) -> str:
+    lines = ["NEXA installed/active capabilities:"]
 
-    lines.append(
-        "Planned skills are not shown as installed. NEXA should never invent skills that are not registered here."
-    )
+    if registry is None:
+        lines.append("Kernel plugins: runtime registry not supplied.")
+    else:
+        lines.append("Kernel plugins:")
+        for metadata in registry.list_metadata():
+            lines.append(f"- {metadata.name} v{metadata.version} - {metadata.description}")
+            for operation in metadata.operations:
+                lines.append(f"  - {operation.name} [{operation.risk.value}]")
+
+    lines.append("Built-in services:")
+    for service in BUILTIN_SERVICES:
+        lines.append(f"- {service.name} [{service.status}] - {service.description}")
+        if service.commands:
+            lines.append("  Commands: " + "; ".join(service.commands))
+
+    lines.append("Executable plugins are reported only from the runtime registry; planned capabilities are not shown as installed.")
     return "\n".join(lines)
 
 
-def handle_skill_command(text: str) -> str | None:
+def handle_skill_command(text: str, registry: Any | None = None) -> str | None:
     if is_skill_list_request(text):
-        return render_skill_list()
+        return render_skill_list(registry)
     return None
