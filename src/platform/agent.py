@@ -17,19 +17,14 @@ class AgentReply:
 
 
 class NexaAgent:
-    """Chat-first execution facade over NEXA capabilities.
-
-    This deterministic foundation keeps execution inspectable. LLM planning can be
-    plugged in above plan() without changing tool/session contracts.
-    """
+    """Chat-first NEXA agent with inspectable tool execution and optional LLM planning."""
 
     def __init__(self, registry: ToolRegistry | None = None, sessions: SessionManager | None = None) -> None:
         self.registry = registry or build_default_registry()
         self.sessions = sessions or SessionManager()
 
     def new_session(self) -> AgentSession:
-        session = self.sessions.create()
-        return self.sessions.transition(session, SessionState.RUNNING)
+        return self.sessions.transition(self.sessions.create(), SessionState.RUNNING)
 
     def chat(self, message: str, session_id: str | None = None) -> AgentReply:
         session = self.sessions.load(session_id) if session_id else self.new_session()
@@ -49,6 +44,22 @@ class NexaAgent:
         return AgentReply(session.id, reply, outputs, session.artifacts)
 
     def plan(self, message: str) -> list[dict[str, Any]]:
+        # Prefer structured Gemini planning when configured, but keep NEXA useful offline.
+        try:
+            from bridges.gemini_bridge import GeminiBridge
+            bridge = GeminiBridge()
+            if bridge.available():
+                catalog = self.registry.catalog()
+                names = [item["name"] for item in catalog]
+                schema = {"type":"object","required":["calls"],"properties":{"calls":{"type":"array","items":{"type":"object","required":["tool","params"],"properties":{"tool":{"type":"string"},"params":{"type":"object"}}}}}}
+                prompt = "User request: " + message + "\nAvailable tools: " + ", ".join(names) + "\nReturn only necessary tool calls. Never invent a tool. For conversation that needs no tool return an empty calls array."
+                planned = bridge.generate_json(prompt, schema, system_instruction="You are NEXA's tool planner. Choose the minimum safe tool calls from the supplied catalog.")
+                calls = planned.get("calls", [])
+                valid = set(names)
+                return [c for c in calls if isinstance(c, dict) and c.get("tool") in valid and isinstance(c.get("params"), dict)]
+        except Exception:
+            pass
+
         text = message.strip()
         lower = text.lower()
         if lower in {"tools", "show tools", "what can you do"}:
@@ -65,8 +76,9 @@ class NexaAgent:
         if message.strip().lower() in {"tools", "show tools", "what can you do"}:
             return "Available tools: " + ", ".join(item["name"] for item in self.registry.catalog())
         if not outputs:
-            return "I understood the request, but no executable tool plan matched yet. Connect an LLM planner or use 'show tools'."
+            return "I can handle this as a conversation, but this build currently executes tasks only when a registered tool is required."
         failed = [x for x in outputs if not x["success"]]
         if failed:
             return "I attempted the task, but a tool failed: " + "; ".join(x["error"] or "unknown error" for x in failed)
-        return f"Completed {len(outputs)} tool action(s) successfully."
+        details = [str(x.get("data")) for x in outputs if x.get("data") is not None]
+        return "Completed successfully." + (("\n\n" + "\n".join(details)) if details else "")
