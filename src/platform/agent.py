@@ -44,25 +44,21 @@ class NexaAgent:
         return AgentReply(session.id, reply, outputs, session.artifacts)
 
     def plan(self, message: str) -> list[dict[str, Any]]:
-        # Prefer structured Gemini planning when configured, but keep NEXA useful offline.
         try:
             from bridges.gemini_bridge import GeminiBridge
             bridge = GeminiBridge()
             if bridge.available():
-                catalog = self.registry.catalog()
-                names = [item["name"] for item in catalog]
+                names = [item["name"] for item in self.registry.catalog()]
                 schema = {"type":"object","required":["calls"],"properties":{"calls":{"type":"array","items":{"type":"object","required":["tool","params"],"properties":{"tool":{"type":"string"},"params":{"type":"object"}}}}}}
                 prompt = "User request: " + message + "\nAvailable tools: " + ", ".join(names) + "\nReturn only necessary tool calls. Never invent a tool. For conversation that needs no tool return an empty calls array."
                 planned = bridge.generate_json(prompt, schema, system_instruction="You are NEXA's tool planner. Choose the minimum safe tool calls from the supplied catalog.")
-                calls = planned.get("calls", [])
                 valid = set(names)
-                return [c for c in calls if isinstance(c, dict) and c.get("tool") in valid and isinstance(c.get("params"), dict)]
+                return [c for c in planned.get("calls", []) if isinstance(c, dict) and c.get("tool") in valid and isinstance(c.get("params"), dict)]
         except Exception:
             pass
 
         text = message.strip()
-        lower = text.lower()
-        if lower in {"tools", "show tools", "what can you do"}:
+        if text.lower() in {"tools", "show tools", "what can you do"}:
             return []
         match = re.match(r"(?:read|open)\s+(.+)$", text, re.I)
         if match:
